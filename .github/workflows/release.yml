@@ -1,9 +1,15 @@
 name: 打包 Windows 安裝檔
 
-# 推一個 v 或 V 開頭的標籤（例如 v0.1.0）就會觸發
 on:
+  # 推一個 v 或 V 開頭的標籤（例如 V0.1）就會自動觸發
   push:
     tags: ['v*', 'V*']
+  # 也可以在 Actions 頁面按「Run workflow」手動執行
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '版本標籤（例如 V0.1）'
+        required: true
 
 permissions:
   contents: write   # 要能建立 Release 並上傳安裝檔
@@ -30,7 +36,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: '毛球貓 ${{ github.ref_name }}'
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: '毛球貓 ${{ inputs.tag || github.ref_name }}'
           releaseBody: '下載 YarnCat_x.x.x_x64-setup.exe，雙擊安裝。'
           releaseDraft: true
