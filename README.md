@@ -39,6 +39,3 @@
 npm install
 npm run tauri dev
 ```
-
-正式安裝檔由 GitHub Actions 產生：推一個 `v` 開頭的標籤，
-`.github/workflows/release.yml` 會在 Windows 機器上編譯，並把安裝檔放進 Release 草稿。
