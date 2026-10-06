@@ -1,0 +1,17 @@
+[package]
+name = "yarncat"
+version = "0.1.0"
+description = "毛球貓：在螢幕底部玩毛球的桌寵"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"

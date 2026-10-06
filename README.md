@@ -1,2 +1,44 @@
-# Yarncat
-喵喵喵 喵!
+# 毛球貓 YarnCat
+
+一隻住在螢幕底部的原創像素貓。你辦公，牠在旁邊玩毛球：盯著球、壓低身體扭屁股、飛撲、用前掌撥，玩累了就趴下睡覺。
+
+目前只支援 Windows 10 / 11。
+
+## 安裝
+
+1. 到 [Releases](../../releases) 下載最新的 `YarnCat_x.x.x_x64-setup.exe`。
+2. 雙擊安裝。
+3. 因為安裝檔沒有程式碼簽章，Windows 可能會跳出「Windows 已保護您的電腦」。按「其他資訊」→「仍要執行」即可。
+
+## 怎麼玩
+
+- 貓和毛球只在工作列上方一條窄區活動，透明的地方滑鼠會直接點到後面的程式。
+- 拖住貓可以把牠拎起來，放開會掉下去。
+- 抓住毛球甩出去，貓會追。
+- 右下角系統匣的貓咪圖示：
+  - **安靜模式**：開會或分享螢幕時讓貓去睡覺。
+  - **結束毛球貓**。
+
+## 原理
+
+| 部分 | 檔案 | 做什麼 |
+| --- | --- | --- |
+| 透明長條視窗 | `src-tauri/tauri.conf.json` | 透明、無邊框、置頂、不出現在工作列 |
+| 擺放位置 | `src-tauri/src/main.rs` `place_strip` | 依螢幕扣掉工作列的範圍，擺在最底部 |
+| 點擊穿透 | `main.rs` `watch_cursor` + `src/index.html` `hitTest` | Rust 每 16ms 回報游標位置，前端判斷在不在貓或毛球上，再開關穿透 |
+| 貓的行為 | `src/index.html` `updateCat` | 狀態機：坐、舔毛、盯、追、撲、撥、睡 |
+| 毛球 | `src/index.html` `updateBall` | 重力、摩擦、反彈，線頭用 Verlet 積分 |
+
+直接用瀏覽器打開 `src/index.html` 也能玩（沒有點擊穿透），改行為時這樣測最快。
+
+## 自己編譯
+
+需要 [Rust](https://www.rust-lang.org/tools/install) 和 [Node.js](https://nodejs.org/)：
+
+```
+npm install
+npm run tauri dev
+```
+
+正式安裝檔由 GitHub Actions 產生：推一個 `v` 開頭的標籤，
+`.github/workflows/release.yml` 會在 Windows 機器上編譯，並把安裝檔放進 Release 草稿。

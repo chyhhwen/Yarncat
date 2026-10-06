@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "主視窗需要的權限：收發事件",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

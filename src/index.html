@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>毛球貓</title>
+<style>
+  /* 視窗是透明的：html、body 都不能有背景色 */
+  html, body { margin:0; height:100%; overflow:hidden; background:transparent; }
+  body { user-select:none; -webkit-user-select:none; }
+  canvas { position:absolute; left:0; bottom:0; image-rendering:pixelated; }
+  body.grab { cursor:grab; } body.grabbing { cursor:grabbing; }
+  /* 直接用瀏覽器開這個檔案（不在桌寵視窗裡）時，給個底色方便除錯 */
+  body.browser { background:#4b5b72; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+/* ═══ 世界設定 ═══
+   畫面先畫在低解析度的 canvas（每 3 個螢幕像素 = 1 個遊戲像素），再放大，所以會是像素風。
+   以下所有座標、速度都是「遊戲像素」，時間單位是「格」（每秒 60 格）。 */
+const S = 3;          // 放大倍率
+const G = 0.15;       // 重力
+const strip = document.documentElement;   // 整個視窗就是那條長條
+const cv    = document.getElementById('cv');
+const ctx   = cv.getContext('2d');
+let W = 0, H = 0, FLOOR = 0;
+
+const C = {           // 貓與毛球的顏色（原創的藍灰虎斑白襪貓）
+  O: '#262530', F: '#808a9c', D: '#5c6577', W: '#f1eee8', P: '#e79aa5', G: '#9fcf6e',
+  Y: '#d4574e', Yl: '#ee8a7f', Yd: '#a93f37',
+};
+
+function resize() {
+  W = Math.ceil(strip.clientWidth / S);
+  H = Math.ceil(strip.clientHeight / S);
+  cv.width = W; cv.height = H;
+  cv.style.width = W * S + 'px'; cv.style.height = H * S + 'px';
+  FLOOR = H - 2;
+  if (cat) { cat.x = clamp(cat.x, 12, W - 12); if (cat.state !== 'held') cat.y = Math.min(cat.y, FLOOR); }
+  if (ball) ball.x = clamp(ball.x, ball.r, W - ball.r);
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const rand  = (a, b) => a + Math.random() * (b - a);
+
+/* ═══ 毛球：重力、摩擦、反彈 ═══ */
+const ball = { x: 0, y: 0, vx: 0, vy: 0, r: 4, a: 0, held: false };
+const rope = [];      // 線頭：一串用 Verlet 積分模擬的點
+const SEG = 2;
+
+function initRope() {
+  rope.length = 0;
+  for (let i = 0; i < 12; i++) {
+    const x = ball.x - i * SEG, y = FLOOR - 0.5;
+    rope.push({ x, y, px: x, py: y });
+  }
+}
+
+function updateBall() {
+  if (!ball.held) {
+    ball.vy += G;
+    ball.x += ball.vx; ball.y += ball.vy;
+    const gy = FLOOR - ball.r;
+    if (ball.y >= gy) {                               // 碰地：反彈並損失能量
+      ball.y = gy;
+      ball.vy = Math.abs(ball.vy) > 0.6 ? -ball.vy * 0.45 : 0;
+      ball.vx *= 0.975;                               // 地面摩擦
+      if (Math.abs(ball.vx) < 0.02) ball.vx = 0;
+    } else {
+      ball.vx *= 0.998;                               // 空氣阻力
+    }
+    if (ball.x < ball.r)     { ball.x = ball.r;     ball.vx =  Math.abs(ball.vx) * 0.6; }
+    if (ball.x > W - ball.r) { ball.x = W - ball.r; ball.vx = -Math.abs(ball.vx) * 0.6; }
+    if (ball.y < ball.r)     { ball.y = ball.r;     ball.vy =  Math.abs(ball.vy) * 0.5; }
+  }
+  ball.a += ball.vx / ball.r;                         // 滾多遠就轉多少
+
+  // 線頭：第 0 點黏在球的表面，其餘點自由擺動
+  rope[0].x = ball.x + Math.cos(ball.a + Math.PI) * ball.r;
+  rope[0].y = ball.y + Math.sin(ball.a + Math.PI) * ball.r;
+  for (let i = 1; i < rope.length; i++) {
+    const p = rope[i];
+    const vx = (p.x - p.px) * 0.98, vy = (p.y - p.py) * 0.98;
+    p.px = p.x; p.py = p.y;
+    p.x += vx; p.y += vy + 0.12;
+    if (p.y > FLOOR - 0.5) { p.y = FLOOR - 0.5; p.px = p.x - vx * 0.6; }
+  }
+  for (let k = 0; k < 4; k++) {                       // 讓每段維持固定長度
+    for (let i = 0; i < rope.length - 1; i++) {
+      const a = rope[i], b = rope[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
+      const diff = (d - SEG) / d;
+      if (i === 0) { b.x -= dx * diff; b.y -= dy * diff; }
+      else { a.x += dx * diff / 2; a.y += dy * diff / 2; b.x -= dx * diff / 2; b.y -= dy * diff / 2; }
+    }
+  }
+}
+
+/* ═══ 貓的大腦：狀態機 ═══ */
+const ZH = { sit: '坐著', lick: '舔毛', stare: '盯著毛球', walk: '散步', chase: '追毛球',
+  crouch: '壓低準備撲', pounce: '飛撲', swipe: '用前掌撥', sleep: '睡覺', held: '被拎起來', fall: '掉下來' };
+const RATE = { sit: 20, lick: 9, stare: 30, walk: 9, chase: 5, crouch: 6, pounce: 99,
+  swipe: 14, sleep: 40, held: 10, fall: 10 };          // 幾格換一張動畫
+const cat = { x: 0, y: 0, vx: 0, vy: 0, dir: 1, state: 'sit', t: 0, dur: 60, frame: 0,
+  energy: 80, target: 0 };
+let quiet = false;
+
+function setState(s, dur = 60) {
+  cat.state = s; cat.t = 0; cat.dur = dur; cat.frame = 0;
+}
+function faceBall() { const d = ball.x - cat.x; if (Math.abs(d) > 1) cat.dir = Math.sign(d); }
+function kick(power, up) {
+  ball.vx = cat.dir * power; ball.vy = -up;
+  cat.energy -= 5;
+}
+function excite() {
+  if (quiet || ['sleep', 'held', 'fall', 'pounce'].includes(cat.state)) return;
+  setState('stare', rand(15, 35));
+}
+
+function nextIdle() {                                  // 閒著的時候要做什麼？擲骰子
+  if (quiet) return setState('sleep', 600);
+  if (cat.energy < 20) return setState('sleep', rand(600, 900));
+  const r = Math.random();
+  if (r < 0.45 && cat.energy > 30) return setState('stare', rand(40, 90));
+  if (r < 0.65) return setState('lick', rand(90, 150));
+  if (r < 0.80) { cat.target = rand(14, W - 14); return setState('walk', 400); }
+  setState('sit', rand(120, 240));
+}
+
+function updateCat() {
+  cat.t++;
+  if (cat.t % RATE[cat.state] === 0) cat.frame++;
+  const d = ball.x - cat.x;
+  const ballOnGround = ball.y >= FLOOR - ball.r - 1;
+  const ballSpeed = Math.hypot(ball.vx, ball.vy);
+
+  switch (cat.state) {
+    case 'sit': case 'lick':
+      cat.energy = Math.min(100, cat.energy + 0.005);
+      if (!quiet && cat.energy > 25 && ballSpeed > 0.8 && Math.abs(d) < 70 && Math.random() < 0.03)
+        setState('stare', rand(15, 30));
+      else if (cat.t > cat.dur) nextIdle();
+      break;
+
+    case 'stare':
+      faceBall();
+      if (cat.t > cat.dur) {
+        if (Math.abs(d) > 13) setState('chase', 480);
+        else if (ballOnGround && ballSpeed < 0.5 && Math.random() < 0.6) setState('swipe', 30);
+        else setState('crouch', rand(35, 70));
+      }
+      break;
+
+    case 'walk': {
+      const dd = cat.target - cat.x;
+      cat.dir = Math.sign(dd) || cat.dir;
+      cat.x += cat.dir * 0.35;
+      if (Math.abs(dd) < 1 || cat.t > cat.dur) setState('sit', rand(90, 180));
+      break;
+    }
+
+    case 'chase':
+      faceBall();
+      cat.x += cat.dir * 1.05;
+      cat.energy -= 0.04;
+      // 跑過球的時候會順便把它踢出去
+      if (ballOnGround && Math.abs(cat.x + cat.dir * 7 - ball.x) < 4 && Math.sign(ball.vx) !== -cat.dir)
+        ball.vx = cat.dir * rand(1.2, 1.8);
+      if (cat.energy < 12 || cat.t > cat.dur) setState('sit', 120);
+      else if (Math.abs(d) < 12 && ballSpeed < 1.2)
+        setState(ballOnGround && Math.random() < 0.55 ? 'swipe' : 'crouch',
+                 ballOnGround ? 30 : rand(30, 50));
+      break;
+
+    case 'crouch':
+      faceBall();
+      cat.energy -= 0.01;
+      if (cat.t > cat.dur) {
+        // 預測落點：起跳到落地大約 2·vy/G 格，順便算進球的移動
+        const flight = 2 * 2.0 / G;
+        const aim = d + ball.vx * flight * 0.5 - cat.dir * 8;
+        cat.vx = clamp(aim / flight, -2, 2);
+        if (Math.sign(cat.vx) !== cat.dir || Math.abs(cat.vx) < 0.4) cat.vx = cat.dir * 0.4;
+        cat.vy = -2.0;
+        setState('pounce', 999);
+      }
+      break;
+
+    case 'pounce':
+      cat.vy += G; cat.x += cat.vx; cat.y += cat.vy;
+      if (cat.y >= FLOOR) {
+        cat.y = FLOOR; cat.vx = 0; cat.vy = 0;
+        const paw = cat.x + cat.dir * 9;
+        if (Math.abs(ball.x - paw) < 8 && ball.y > FLOOR - 16) kick(rand(1.6, 3.2), rand(0.8, 2));
+        setState('stare', rand(30, 70));
+      }
+      break;
+
+    case 'swipe':
+      if (cat.t === 14) {
+        const paw = cat.x + cat.dir * 9;
+        if (Math.abs(ball.x - paw) < 7 && ball.y > FLOOR - 14) kick(rand(0.8, 1.6), rand(0.2, 0.8));
+      }
+      if (cat.t > cat.dur) setState(cat.energy > 25 ? 'stare' : 'sit', rand(40, 80));
+      break;
+
+    case 'sleep':
+      cat.energy = Math.min(100, cat.energy + 0.15);
+      if (!quiet && cat.t > cat.dur && cat.energy > 90) setState('sit', 120);
+      break;
+
+    case 'held':
+      break;                                           // 位置由滑鼠決定
+
+    case 'fall':
+      cat.vy += G; cat.x += cat.vx; cat.y += cat.vy;
+      if (cat.y >= FLOOR) { cat.y = FLOOR; cat.vx = cat.vy = 0; setState(quiet ? 'sleep' : 'sit', 90); }
+      break;
+  }
+  cat.x = clamp(cat.x, 12, W - 12);
+  cat.energy = clamp(cat.energy, 0, 100);
+}
+
+/* ═══ 繪圖：每個姿勢是一組長方形 [x, y, 寬, 高, 顏色]，y=0 是腳底，面向右 ═══
+   parts 會先統一描黑邊再填色，所以拼起來像一整塊輪廓；details 不描邊。 */
+function sitPose(f, mode) {
+  const parts = [
+    [-12, -2, 8, 2, 'F'], [-13, -4, 2, 2, 'F'],       // 尾巴繞在地上
+    [-9, -7, 9, 7, 'F'],                               // 後腿
+    [-3, -13, 7, 11, 'F'],                             // 胸口
+    [-1, -20, 8, 7, 'F'], [-1, -22, 2, 2, 'F'], [4, -22, 2, 2, 'F'],   // 頭、耳朵
+  ];
+  const det = [
+    [1, -11, 3, 6, 'W'], [3, -16, 4, 3, 'W'], [6, -16, 1, 1, 'P'],
+    [-7, -7, 1, 3, 'D'], [-4, -7, 1, 3, 'D'], [0, -21, 1, 1, 'P'], [5, -21, 1, 1, 'P'],
+  ];
+  if (mode === 'swipe') {
+    parts.push([1, -4, 2, 4, 'F']);
+    parts.push(f % 2 === 0 ? [5, -10, 3, 2, 'F'] : [6, -6, 4, 2, 'F']);
+    det.push([1, -1, 2, 1, 'W'], [4, -18, 1, 2, 'E']);
+  } else {
+    parts.push([1, -4, 2, 4, 'F'], [3, -4, 2, 4, 'F']);
+    det.push([1, -1, 4, 1, 'W']);
+    if (mode === 'stare') det.push([4, -18, 2, 1, 'G'], [4, -17, 2, 1, 'E']);
+    else if (f % 12 === 11) det.push([4, -17, 1, 1, 'E']);    // 眨眼
+    else det.push([4, -18, 1, 1, 'G'], [4, -17, 1, 1, 'E']);
+  }
+  return [parts, det];
+}
+function lickPose(f) {
+  const parts = [
+    [-12, -2, 8, 2, 'F'], [-13, -4, 2, 2, 'F'], [-9, -7, 9, 7, 'F'], [-3, -13, 7, 11, 'F'],
+    [0, -18, 8, 7, 'F'], [0, -20, 2, 2, 'F'], [5, -20, 2, 2, 'F'],
+    [1, -4, 2, 4, 'F'], [4, -12, 2, 6, 'F'],          // 一隻腳舉到嘴邊
+  ];
+  const det = [[1, -11, 2, 6, 'W'], [3, -14, 4, 3, 'W'], [4, -16, 2, 1, 'E'], [1, -1, 2, 1, 'W'],
+    [4, -7, 2, 1, 'W'], [-7, -7, 1, 3, 'D'], [-4, -7, 1, 3, 'D']];
+  if (f % 2) det.push([6, -12, 1, 1, 'P']);
+  return [parts, det];
+}
+function standPose(f) {
+  const s = [0, 1, 0, -1][f % 4];
+  const sw = f % 2;
+  const parts = [
+    [-11, -10, 2, 3, 'F'], [-12 + sw, -13, 2, 3, 'F'], [-11 + sw, -15, 2, 2, 'F'],   // 尾巴翹起
+    [-8 + s, -4, 2, 4, 'F'], [-5 - s, -4, 2, 4, 'F'], [2 - s, -4, 2, 4, 'F'], [5 + s, -4, 2, 4, 'F'],
+    [-10, -10, 16, 6, 'F'],
+    [4, -15, 8, 7, 'F'], [4, -17, 2, 2, 'F'], [9, -17, 2, 2, 'F'],
+  ];
+  const det = [
+    [-6, -10, 1, 3, 'D'], [-3, -10, 1, 3, 'D'], [0, -10, 1, 2, 'D'], [-7, -5, 11, 1, 'W'],
+    [-8 + s, -1, 2, 1, 'W'], [-5 - s, -1, 2, 1, 'W'], [2 - s, -1, 2, 1, 'W'], [5 + s, -1, 2, 1, 'W'],
+    [8, -11, 4, 3, 'W'], [9, -13, 1, 1, 'G'], [9, -12, 1, 1, 'E'], [11, -11, 1, 1, 'P'],
+    [5, -16, 1, 1, 'P'], [10, -16, 1, 1, 'P'],
+  ];
+  return [parts, det];
+}
+function crouchPose(f) {
+  const w = f % 2;                                     // 屁股左右扭
+  const parts = [
+    [-16, -6 - w, 6, 2, 'F'],
+    [-8 + w, -2, 2, 2, 'F'], [-5 + w, -2, 2, 2, 'F'], [2, -2, 2, 2, 'F'], [5, -2, 2, 2, 'F'],
+    [-10 + w, -7, 16 - w, 5, 'F'],
+    [5, -11, 8, 6, 'F'], [5, -13, 2, 2, 'F'], [10, -13, 2, 2, 'F'],
+  ];
+  const det = [[-6, -7, 1, 3, 'D'], [-3, -7, 1, 3, 'D'], [-7, -3, 11, 1, 'W'],
+    [9, -8, 4, 3, 'W'], [10, -10, 2, 1, 'G'], [10, -9, 2, 1, 'E'], [12, -8, 1, 1, 'P']];
+  return [parts, det];
+}
+function pouncePose() {
+  const parts = [
+    [-18, -12, 7, 2, 'F'], [-15, -8, 5, 2, 'F'], [6, -7, 6, 2, 'F'],
+    [-11, -11, 19, 5, 'F'],
+    [7, -15, 8, 7, 'F'], [7, -17, 2, 2, 'F'], [12, -17, 2, 2, 'F'],
+  ];
+  const det = [[-6, -11, 1, 3, 'D'], [-2, -11, 1, 3, 'D'], [-8, -7, 13, 1, 'W'], [10, -7, 2, 1, 'W'],
+    [11, -11, 4, 3, 'W'], [12, -13, 2, 1, 'G'], [12, -12, 2, 1, 'E'], [14, -11, 1, 1, 'P']];
+  return [parts, det];
+}
+function sleepPose(f) {
+  const b = f % 2;                                     // 呼吸
+  const parts = [
+    [-10, -8 + b, 17, 8 - b, 'F'],
+    [3, -11, 8, 7, 'F'], [3, -13, 2, 2, 'F'], [8, -13, 2, 2, 'F'],
+    [-10, -2, 16, 2, 'D'],                             // 尾巴圍在前面
+  ];
+  const det = [[-6, -8 + b, 1, 3, 'D'], [-2, -8 + b, 1, 3, 'D'], [7, -8, 2, 1, 'E'],
+    [7, -7, 3, 2, 'W'], [10, -7, 1, 1, 'P']];
+  return [parts, det];
+}
+function heldPose(f) {
+  const s = [0, 1, 0, -1][f % 4];                      // 四腳懸空晃
+  const parts = [
+    [0 + s, -6, 2, 4, 'F'], [1 + s, -3, 2, 2, 'F'],
+    [-3 + s, -9, 2, 5, 'F'], [2 + s, -9, 2, 5, 'F'],
+    [-6, -18, 3, 2, 'F'], [4, -18, 3, 2, 'F'],
+    [-3, -19, 7, 11, 'F'],
+    [-4, -27, 9, 8, 'F'], [-4, -29, 2, 2, 'F'], [3, -29, 2, 2, 'F'],
+  ];
+  const det = [[-1, -17, 3, 7, 'W'], [-2, -24, 1, 2, 'E'], [2, -24, 1, 2, 'E'],
+    [-1, -22, 3, 2, 'W'], [0, -22, 1, 1, 'P'], [0, -20, 1, 1, 'E'],
+    [-3 + s, -5, 2, 1, 'W'], [2 + s, -5, 2, 1, 'W']];
+  return [parts, det];
+}
+function currentPose() {
+  const f = cat.frame;
+  switch (cat.state) {
+    case 'stare': return sitPose(f, 'stare');
+    case 'swipe': return sitPose(f, 'swipe');
+    case 'lick': return lickPose(f);
+    case 'walk': case 'chase': return standPose(f);
+    case 'crouch': return crouchPose(f);
+    case 'pounce': return pouncePose();
+    case 'sleep': return sleepPose(f);
+    case 'held': case 'fall': return heldPose(f);
+    default: return sitPose(f, 'sit');
+  }
+}
+
+function drawCat() {
+  const [parts, det] = currentPose();
+  const ox = Math.round(cat.x);
+  const oy = Math.round(cat.y) - (cat.state === 'chase' && cat.frame % 2 ? 1 : 0);
+  const X = (x, w) => cat.dir > 0 ? ox + x : ox - x - w;
+  ctx.fillStyle = C.O;
+  for (const [x, y, w, h] of parts) ctx.fillRect(X(x - 1, w + 2), oy + y - 1, w + 2, h + 2);
+  for (const [x, y, w, h, c] of parts) { ctx.fillStyle = C[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
+  for (const [x, y, w, h, c] of det)   { ctx.fillStyle = C[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
+  if (cat.state === 'sleep') drawZ(ox + cat.dir * 8, oy - 14);
+}
+function drawZ(x, y) {                                 // 一個慢慢飄上去的 z
+  const k = (cat.t % 120) / 120;
+  const zx = Math.round(x + k * 4), zy = Math.round(y - k * 10);
+  ctx.globalAlpha = 1 - k;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(zx, zy, 3, 1); ctx.fillRect(zx + 1, zy + 1, 1, 1); ctx.fillRect(zx, zy + 2, 3, 1);
+  ctx.globalAlpha = 1;
+}
+
+function drawBall() {
+  const cx = Math.round(ball.x), cy = Math.round(ball.y), r = ball.r;
+  const ca = Math.cos(ball.a), sa = Math.sin(ball.a);
+  ctx.fillStyle = C.O;
+  for (let dy = -r - 1; dy <= r + 1; dy++) for (let dx = -r - 1; dx <= r + 1; dx++)
+    if (dx * dx + dy * dy <= (r + 1) * (r + 1) - 1) ctx.fillRect(cx + dx, cy + dy, 1, 1);
+  for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+    if (dx * dx + dy * dy > r * r) continue;
+    const u = Math.round(dx * ca + dy * sa);           // 毛線紋路跟著旋轉
+    ctx.fillStyle = (u + 30) % 3 === 0 ? C.Yl : C.Y;
+    ctx.fillRect(cx + dx, cy + dy, 1, 1);
+  }
+}
+function drawRope() {
+  ctx.fillStyle = C.Yd;
+  for (let i = 0; i < rope.length - 1; i++) line(rope[i].x, rope[i].y, rope[i + 1].x, rope[i + 1].y);
+}
+function line(x0, y0, x1, y1) {                        // Bresenham 畫線，保持像素感
+  x0 = Math.round(x0); y0 = Math.round(y0); x1 = Math.round(x1); y1 = Math.round(y1);
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    ctx.fillRect(x0, y0, 1, 1);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+}
+/* ═══ 點擊判定：滑鼠在貓或球上嗎？（Windows 版用同一個函式切換穿透） ═══ */
+function catBox() {
+  const x = cat.x, y = cat.y;
+  switch (cat.state) {
+    case 'sleep': return { x0: x - 12, y0: y - 14, x1: x + 12, y1: y + 1 };
+    case 'held': case 'fall': return { x0: x - 7, y0: y - 30, x1: x + 8, y1: y + 1 };
+    case 'sit': case 'stare': case 'lick': case 'swipe': return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+    default: return { x0: x - 19, y0: y - 18, x1: x + 19, y1: y + 1 };
+  }
+}
+const ballBox = () => ({ x0: ball.x - ball.r - 2, y0: ball.y - ball.r - 2, x1: ball.x + ball.r + 2, y1: ball.y + ball.r + 2 });
+const inBox = (p, b) => p.x >= b.x0 && p.x <= b.x1 && p.y >= b.y0 && p.y <= b.y1;
+function toWorld(e) {
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / S, y: (e.clientY - r.top) / S };
+}
+function hitTest(p) {
+  if (inBox(p, catBox())) return 'cat';
+  if (inBox(p, ballBox())) return 'ball';
+  return null;
+}
+
+/* ═══ 點擊穿透（只有在桌寵視窗裡才有作用） ═══
+   視窗預設「滑鼠穿透」，點擊直接落到後面的程式。Rust 那邊每 16ms 回報一次游標位置，
+   這裡用 hitTest() 判斷游標是不是在貓或毛球上，是的話就關掉穿透，讓你抓得到。 */
+const TAURI = window.__TAURI__;
+let passthrough = true;
+function setPassthrough(on) {
+  if (!TAURI || on === passthrough) return;
+  passthrough = on;
+  TAURI.core.invoke('set_passthrough', { on });
+}
+if (TAURI) {
+  TAURI.event.listen('cursor', ({ payload }) => {
+    if (drag) return;                                  // 拖曳中不切換，否則會中途鬆手
+    const hit = hitTest(toWorld({ clientX: payload.x, clientY: payload.y }));
+    setPassthrough(!hit);
+    document.body.classList.toggle('grab', !!hit);
+  });
+  TAURI.event.listen('quiet', ({ payload }) => setQuiet(!!payload));
+} else {
+  document.body.classList.add('browser');
+}
+
+/* ═══ 互動：拖貓、甩球 ═══ */
+let drag = null;
+
+window.addEventListener('pointerdown', e => {
+  const kind = hitTest(toWorld(e));
+  if (!kind) return;
+  e.preventDefault();
+  drag = { kind, id: e.pointerId, hist: [] };
+  try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+  if (kind === 'cat') { setState('held'); cat.vx = cat.vy = 0; }
+  else ball.held = true;
+  moveDrag(e);
+  document.body.classList.add('grabbing');
+});
+window.addEventListener('pointermove', e => {
+  if (drag && e.pointerId === drag.id) { moveDrag(e); return; }
+  if (!TAURI) document.body.classList.toggle('grab', !!hitTest(toWorld(e)));
+});
+function moveDrag(e) {
+  const p = toWorld(e);
+  drag.hist.push({ x: p.x, y: p.y, t: performance.now() });
+  if (drag.hist.length > 8) drag.hist.shift();
+  if (drag.kind === 'cat') { cat.x = clamp(p.x, 12, W - 12); cat.y = clamp(p.y + 27, 30, FLOOR); }
+  else { ball.x = clamp(p.x, ball.r, W - ball.r); ball.y = clamp(p.y, ball.r, FLOOR - ball.r); ball.vx = ball.vy = 0; }
+}
+function endDrag(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const h = drag.hist, now = performance.now();
+  let vx = 0, vy = 0;
+  const old = h.find(q => now - q.t < 100), last = h[h.length - 1];
+  if (old && last && last.t > old.t) {                 // 甩的速度：最近 0.1 秒的位移
+    vx = (last.x - old.x) / (last.t - old.t) * 16.7;
+    vy = (last.y - old.y) / (last.t - old.t) * 16.7;
+  }
+  if (drag.kind === 'cat') {
+    cat.vx = clamp(vx, -3, 3); cat.vy = clamp(vy, -3, 3);
+    setState('fall', 999);
+  } else {
+    ball.held = false;
+    ball.vx = clamp(vx, -5, 5); ball.vy = clamp(vy, -5, 5);
+    if (Math.hypot(ball.vx, ball.vy) > 0.5) excite();
+  }
+  drag = null;
+  document.body.classList.remove('grabbing');
+}
+window.addEventListener('pointerup', endDrag);
+window.addEventListener('pointercancel', endDrag);
+
+function setQuiet(on) {                                // 系統匣的「安靜模式」
+  quiet = on;
+  if (quiet && !['held', 'fall', 'pounce'].includes(cat.state)) setState('sleep', 600);
+  if (!quiet && cat.state === 'sleep') setState('sit', 90);
+}
+
+/* ═══ 遊戲迴圈：固定每秒 60 次更新，畫面跟著螢幕刷新 ═══ */
+let acc = 0, lastT = performance.now();
+function frame(now) {
+  acc += Math.min(now - lastT, 100); lastT = now;
+  while (acc >= 1000 / 60) { updateBall(); updateCat(); acc -= 1000 / 60; }
+  ctx.clearRect(0, 0, W, H);
+  drawRope(); drawBall(); drawCat();
+  requestAnimationFrame(frame);
+}
+
+resize();
+cat.x = W * 0.35; cat.y = FLOOR;
+ball.x = W * 0.6; ball.y = FLOOR - ball.r;
+initRope();
+setState('stare', 60);
+window.addEventListener('resize', resize);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
