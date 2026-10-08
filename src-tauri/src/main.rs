@@ -2,15 +2,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
     time::Duration,
 };
 
 use serde::Serialize;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem, Submenu},
+    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
+    window::Monitor,
     Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
 };
 
@@ -20,6 +24,12 @@ const STRIP_HEIGHT: f64 = 150.0;
 /// 雷射光、逗貓棒跟著游標跑遍全螢幕，要一直回報游標位置；
 /// 毛球只在乎游標有沒有在長條裡，離開長條就不用回報
 static FOLLOW_EVERYWHERE: AtomicBool = AtomicBool::new(false);
+
+/// 系統匣「螢幕」選的螢幕（用 monitor_key 辨識）；None 表示主螢幕
+static CHOSEN_SCREEN: Mutex<Option<String>> = Mutex::new(None);
+
+/// 選單換了螢幕，請監看執行緒馬上重擺，不用等下一次的每秒檢查
+static PLACE_NOW: AtomicBool = AtomicBool::new(false);
 
 /// 每隔幾格（每格 16ms）檢查一次長條的位置，約 1 秒
 const PLACE_CHECK_TICKS: u32 = 60;
@@ -36,14 +46,36 @@ fn set_passthrough(window: WebviewWindow, on: bool) -> Result<(), String> {
 /// 長條該擺在哪、多大（實體像素）：(x, y, 寬, 高)
 type Rect = (i32, i32, u32, u32);
 
-/// 算出主螢幕底部、工作列正上方那條長條的位置
+/// 辨識螢幕用的名字（Windows 是 \\.\DISPLAY1 這類）；拿不到名字就用左上角座標
+fn monitor_key(m: &Monitor) -> String {
+    match m.name() {
+        Some(n) => n.clone(),
+        None => format!("{},{}", m.position().x, m.position().y),
+    }
+}
+
+/// 貓要待的螢幕：系統匣選的那個；沒選、或那個螢幕已經拔掉了，就用主螢幕
+fn pick_monitor(win: &WebviewWindow) -> tauri::Result<Option<Monitor>> {
+    let chosen = CHOSEN_SCREEN.lock().ok().and_then(|c| c.clone());
+    if let Some(key) = chosen {
+        let found = win
+            .available_monitors()?
+            .into_iter()
+            .find(|m| monitor_key(m) == key);
+        if found.is_some() {
+            return Ok(found);
+        }
+    }
+    match win.primary_monitor()? {
+        Some(m) => Ok(Some(m)),
+        None => win.current_monitor(),
+    }
+}
+
+/// 算出長條的位置：所選螢幕的底部、工作列正上方
 fn strip_rect(win: &WebviewWindow) -> tauri::Result<Option<Rect>> {
-    let monitor = match win.primary_monitor()? {
-        Some(m) => m,
-        None => match win.current_monitor()? {
-            Some(m) => m,
-            None => return Ok(None),
-        },
+    let Some(monitor) = pick_monitor(win)? else {
+        return Ok(None);
     };
     // work_area = 螢幕扣掉工作列的範圍，工作列放在哪一邊都適用
     let area = monitor.work_area();
@@ -52,10 +84,12 @@ fn strip_rect(win: &WebviewWindow) -> tauri::Result<Option<Rect>> {
     Ok(Some((area.position.x, bottom - height as i32, area.size.width, height)))
 }
 
-/// 把視窗擺到 rect
+/// 把視窗擺到 rect。
+/// 先搬位置再改大小：搬到縮放比例不同的螢幕時，Windows 會自動依新比例縮放視窗，
+/// 最後再設一次大小，才會是我們算好的尺寸。
 fn apply_rect(win: &WebviewWindow, r: Rect) -> tauri::Result<()> {
-    win.set_size(PhysicalSize::new(r.2, r.3))?;
     win.set_position(PhysicalPosition::new(r.0, r.1))?;
+    win.set_size(PhysicalSize::new(r.2, r.3))?;
     Ok(())
 }
 
@@ -128,7 +162,8 @@ fn watch_cursor(win: WebviewWindow) {
             thread::sleep(Duration::from_millis(16));
             tick = tick.wrapping_add(1);
             // 視窗位置、大小、縮放只有重擺時才會變，每秒讀一次就好，不用每格都問
-            if tick % PLACE_CHECK_TICKS == 0 {
+            let now = PLACE_NOW.swap(false, Ordering::Relaxed);
+            if now || tick % PLACE_CHECK_TICKS == 0 {
                 placer.check(&win);
                 geo = read_geometry(&win);
             }
@@ -175,14 +210,37 @@ fn main() {
             win.show()?;
             watch_cursor(win.clone());
 
-            // 系統匣：換玩具、安靜模式（開會、分享螢幕時讓貓去睡）、結束
+            // 系統匣：換玩具、換螢幕、安靜模式（開會、分享螢幕時讓貓去睡）、結束
             let toy_ball = CheckMenuItem::with_id(app, "toy:ball", "毛球", true, true, None::<&str>)?;
             let toy_laser = CheckMenuItem::with_id(app, "toy:laser", "雷射光", true, false, None::<&str>)?;
             let toy_wand = CheckMenuItem::with_id(app, "toy:wand", "逗貓棒", true, false, None::<&str>)?;
             let toys = Submenu::with_items(app, "玩具", true, &[&toy_ball, &toy_laser, &toy_wand])?;
+            // 螢幕：啟動當下接著的螢幕，由左到右編號。之後才接上的螢幕要重開毛球貓才會出現
+            let mut monitors = win.available_monitors()?;
+            monitors.sort_by_key(|m| (m.position().x, m.position().y));
+            let primary_key = win.primary_monitor()?.map(|m| monitor_key(&m));
+            let mut screen_items = Vec::new();
+            let mut screen_keys = Vec::new();
+            for (i, m) in monitors.iter().enumerate() {
+                let key = monitor_key(m);
+                let is_primary = primary_key.as_deref() == Some(key.as_str());
+                let label = format!(
+                    "螢幕 {}：{}×{}{}",
+                    i + 1,
+                    m.size().width,
+                    m.size().height,
+                    if is_primary { "（主螢幕）" } else { "" }
+                );
+                let id = format!("screen:{i}");
+                screen_items.push(CheckMenuItem::with_id(app, id, label, true, is_primary, None::<&str>)?);
+                screen_keys.push(key);
+            }
+            let screen_refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
+                screen_items.iter().map(|it| it as &dyn IsMenuItem<tauri::Wry>).collect();
+            let screens = Submenu::with_items(app, "螢幕", true, &screen_refs)?;
             let quiet = CheckMenuItem::with_id(app, "quiet", "安靜模式", true, false, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "結束毛球貓", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toys, &quiet, &quit])?;
+            let menu = Menu::with_items(app, &[&toys, &screens, &quiet, &quit])?;
             let quiet_item = quiet.clone();
             let toy_items = [toy_ball, toy_laser, toy_wand];
             TrayIconBuilder::with_id("tray")
@@ -203,6 +261,18 @@ fn main() {
                         }
                         FOLLOW_EVERYWHERE.store(id != "toy:ball", Ordering::Relaxed);
                         let _ = app.emit("toy", &id[4..]);
+                    }
+                    // 螢幕也只能選一個；選好之後請監看執行緒馬上把長條搬過去
+                    id if id.starts_with("screen:") => {
+                        for item in &screen_items {
+                            let mine: &str = item.id().as_ref();
+                            let _ = item.set_checked(mine == id);
+                        }
+                        let picked = id[7..].parse::<usize>().ok().and_then(|i| screen_keys.get(i));
+                        if let (Some(key), Ok(mut chosen)) = (picked, CHOSEN_SCREEN.lock()) {
+                            *chosen = Some(key.clone());
+                            PLACE_NOW.store(true, Ordering::Relaxed);
+                        }
                     }
                     _ => {}
                 })
