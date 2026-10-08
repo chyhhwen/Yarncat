@@ -1,8 +1,8 @@
 [package]
 name = "yarncat"
-version = "0.1.0"
+version = "0.2.0"
 description = "毛球貓：在螢幕底部玩毛球的桌寵"
-edition = "2021"
+edition = "2026"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
