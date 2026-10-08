@@ -40,8 +40,8 @@
 | 部分 | 檔案 | 做什麼 |
 | --- | --- | --- |
 | 透明長條視窗 | `src-tauri/tauri.conf.json` | 透明、無邊框、置頂、不出現在工作列 |
-| 擺放位置 | `src-tauri/src/main.rs` `place_strip` | 依螢幕扣掉工作列的範圍，擺在最底部 |
-| 點擊穿透 | `main.rs` `watch_cursor` + `src/index.html` `hitTest` | Rust 每 16ms 回報游標位置，前端判斷在不在貓或毛球上，再開關穿透 |
+| 擺放位置 | `src-tauri/src/main.rs` `strip_rect`、`Placer` | 依螢幕扣掉工作列的範圍，擺在最底部；每秒檢查一次，換螢幕、改縮放、搬工作列後自動重擺 |
+| 點擊穿透 | `main.rs` `watch_cursor` + `src/index.html` `hitTest` | Rust 每 16ms 回報游標位置（毛球模式只在游標進到長條時回報），前端判斷在不在貓或毛球上，再開關穿透 |
 | 貓的行為 | `src/index.html` `updateCat` | 狀態機：坐、舔毛、盯、追、撲、撥、睡；雷射光、逗貓棒另外有追、壓低、跳起來拍、抓住吊著 |
 | 毛球 | `src/index.html` `updateBall` | 重力、摩擦、反彈，線頭用 Verlet 積分 |
 | 雷射光、逗貓棒 | `src/index.html` `updateLaser`、`updateWand` | 紅點、逗貓棒的線都掛在游標上（`watch_cursor` 回報的位置） |

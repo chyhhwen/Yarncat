@@ -1,7 +1,11 @@
 // 正式版不跳出黑色主控台視窗
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{thread, time::Duration};
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    thread,
+    time::Duration,
+};
 
 use serde::Serialize;
 use tauri::{
@@ -13,28 +17,83 @@ use tauri::{
 /// 長條視窗的高度（邏輯像素，會依螢幕縮放比例換算）
 const STRIP_HEIGHT: f64 = 150.0;
 
+/// 雷射光、逗貓棒跟著游標跑遍全螢幕，要一直回報游標位置；
+/// 毛球只在乎游標有沒有在長條裡，離開長條就不用回報
+static FOLLOW_EVERYWHERE: AtomicBool = AtomicBool::new(false);
+
+/// 每隔幾格（每格 16ms）檢查一次長條的位置，約 1 秒
+const PLACE_CHECK_TICKS: u32 = 60;
+
+/// 同一個目標位置最多補擺幾次，避免系統不肯配合時每秒都在搬
+const PLACE_RETRIES: u8 = 3;
+
 /// 前端判斷游標在不在貓或毛球上之後，呼叫這個開關「滑鼠穿透」
 #[tauri::command]
 fn set_passthrough(window: WebviewWindow, on: bool) -> Result<(), String> {
     window.set_ignore_cursor_events(on).map_err(|e| e.to_string())
 }
 
-/// 把視窗擺成主螢幕底部、工作列正上方的一條長條
-fn place_strip(win: &WebviewWindow) -> tauri::Result<()> {
+/// 長條該擺在哪、多大（實體像素）：(x, y, 寬, 高)
+type Rect = (i32, i32, u32, u32);
+
+/// 算出主螢幕底部、工作列正上方那條長條的位置
+fn strip_rect(win: &WebviewWindow) -> tauri::Result<Option<Rect>> {
     let monitor = match win.primary_monitor()? {
         Some(m) => m,
         None => match win.current_monitor()? {
             Some(m) => m,
-            None => return Ok(()),
+            None => return Ok(None),
         },
     };
     // work_area = 螢幕扣掉工作列的範圍，工作列放在哪一邊都適用
     let area = monitor.work_area();
     let height = (STRIP_HEIGHT * monitor.scale_factor()).round() as u32;
     let bottom = area.position.y + area.size.height as i32;
-    win.set_size(PhysicalSize::new(area.size.width, height))?;
-    win.set_position(PhysicalPosition::new(area.position.x, bottom - height as i32))?;
+    Ok(Some((area.position.x, bottom - height as i32, area.size.width, height)))
+}
+
+/// 把視窗擺到 rect
+fn apply_rect(win: &WebviewWindow, r: Rect) -> tauri::Result<()> {
+    win.set_size(PhysicalSize::new(r.2, r.3))?;
+    win.set_position(PhysicalPosition::new(r.0, r.1))?;
     Ok(())
+}
+
+/// 視窗現在實際在哪、多大
+fn actual_rect(win: &WebviewWindow) -> Option<Rect> {
+    let p = win.outer_position().ok()?;
+    let s = win.inner_size().ok()?;
+    Some((p.x, p.y, s.width, s.height))
+}
+
+/// 換螢幕、改縮放、搬工作列之後，長條要跟著重擺。
+/// 這些變化不一定有事件可聽，所以定期比對「該在的位置」和「實際位置」。
+struct Placer {
+    want: Option<Rect>,
+    retries: u8,
+}
+
+impl Placer {
+    fn check(&mut self, win: &WebviewWindow) {
+        let Ok(Some(want)) = strip_rect(win) else {
+            return;
+        };
+        if actual_rect(win) == Some(want) {
+            self.want = Some(want);
+            self.retries = 0;
+            return;
+        }
+        if self.want == Some(want) {
+            if self.retries >= PLACE_RETRIES {
+                return;
+            }
+            self.retries += 1;
+        } else {
+            self.want = Some(want);
+            self.retries = 1;
+        }
+        let _ = apply_rect(win, want);
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -43,19 +102,52 @@ struct Cursor {
     y: f64,
 }
 
-/// 視窗穿透時收不到任何滑鼠事件，所以由這裡主動輪詢游標位置，轉成視窗內座標交給前端
+/// 換算游標座標要用的視窗資訊：左上角、大小（實體像素）、縮放比例
+struct Geometry {
+    rect: Rect,
+    scale: f64,
+}
+
+fn read_geometry(win: &WebviewWindow) -> Option<Geometry> {
+    Some(Geometry {
+        rect: actual_rect(win)?,
+        scale: win.scale_factor().ok()?,
+    })
+}
+
+/// 視窗穿透時收不到任何滑鼠事件，所以由這裡主動輪詢游標位置，轉成視窗內座標交給前端。
+/// 順便每秒檢查一次長條有沒有擺對位置。
 fn watch_cursor(win: WebviewWindow) {
     thread::spawn(move || {
         let mut last = (f64::NAN, f64::NAN);
+        let mut was_inside = false;
+        let mut placer = Placer { want: None, retries: 0 };
+        let mut geo = read_geometry(&win);
+        let mut tick: u32 = 0;
         loop {
             thread::sleep(Duration::from_millis(16));
-            let (Ok(c), Ok(p), Ok(scale)) =
-                (win.cursor_position(), win.outer_position(), win.scale_factor())
-            else {
+            tick = tick.wrapping_add(1);
+            // 視窗位置、大小、縮放只有重擺時才會變，每秒讀一次就好，不用每格都問
+            if tick % PLACE_CHECK_TICKS == 0 {
+                placer.check(&win);
+                geo = read_geometry(&win);
+            }
+            let (Some(g), Ok(c)) = (&geo, win.cursor_position()) else {
                 continue;
             };
-            let x = (c.x - p.x as f64) / scale;
-            let y = (c.y - p.y as f64) / scale;
+            let (left, top, w, h) = g.rect;
+            let inside = c.x >= left as f64
+                && c.x < left as f64 + w as f64
+                && c.y >= top as f64
+                && c.y < top as f64 + h as f64;
+            // 毛球模式：游標在長條外就不回報，只在剛離開時補一次，讓前端把穿透打開
+            let report = FOLLOW_EVERYWHERE.load(Ordering::Relaxed) || inside || was_inside;
+            was_inside = inside;
+            if !report {
+                continue;
+            }
+            let x = (c.x - left as f64) / g.scale;
+            let y = (c.y - top as f64) / g.scale;
             if (x, y) == last {
                 continue;
             }
@@ -76,7 +168,9 @@ fn main() {
             let win = app
                 .get_webview_window("main")
                 .expect("找不到 main 視窗");
-            place_strip(&win)?;
+            if let Some(r) = strip_rect(&win)? {
+                apply_rect(&win, r)?;
+            }
             win.set_ignore_cursor_events(true)?;
             win.show()?;
             watch_cursor(win.clone());
@@ -107,6 +201,7 @@ fn main() {
                             let mine: &str = item.id().as_ref();
                             let _ = item.set_checked(mine == id);
                         }
+                        FOLLOW_EVERYWHERE.store(id != "toy:ball", Ordering::Relaxed);
                         let _ = app.emit("toy", &id[4..]);
                     }
                     _ => {}

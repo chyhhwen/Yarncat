@@ -18,9 +18,17 @@
 <canvas id="cv"></canvas>
 <script>
 /* ═══ 世界設定 ═══
-   畫面先畫在低解析度的 canvas（每 3 個螢幕像素 = 1 個遊戲像素），再放大，所以會是像素風。
+   畫面先畫在低解析度的 canvas（100% 縮放時每 3 個螢幕像素 = 1 個遊戲像素），再放大，所以會是像素風。
    以下所有座標、速度都是「遊戲像素」，時間單位是「格」（每秒 60 格）。 */
-const S = 3;          // 放大倍率
+const BASE = 3;       // 100% 縮放時的放大倍率
+let S = BASE;         // 每個遊戲像素佔幾個 CSS 像素，由 pickScale() 決定
+
+/* 125%、150% 縮放時 3 個 CSS 像素 = 3.75、4.5 個實體像素，放大後格子會 4、5、4、5 大小不一。
+   所以改成先挑「每個遊戲像素佔幾個實體像素」（取整數），再換回 CSS 像素。 */
+function pickScale() {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.max(1, Math.round(BASE * dpr)) / dpr;
+}
 const G = 0.15;       // 重力
 const strip = document.documentElement;   // 整個視窗就是那條長條
 const cv    = document.getElementById('cv');
@@ -33,13 +41,27 @@ const C = {           // 貓與毛球的顏色（原創的藍灰虎斑白襪貓�
 };
 
 function resize() {
+  const oldS = S, oldFloor = FLOOR;
+  S = pickScale();
   W = Math.ceil(strip.clientWidth / S);
   H = Math.ceil(strip.clientHeight / S);
   cv.width = W; cv.height = H;
   cv.style.width = W * S + 'px'; cv.style.height = H * S + 'px';
   FLOOR = H - 2;
-  if (cat) { cat.x = clamp(cat.x, 12, W - 12); if (cat.state !== 'held') cat.y = Math.min(cat.y, FLOOR); }
-  if (ball) ball.x = clamp(ball.x, ball.r, W - ball.r);
+  if (!started) return;                                // 開場時位置還沒擺，下面不用調
+  if (S !== oldS) {                                    // 倍率變了：維持在螢幕上的同一個位置
+    cat.x *= oldS / S; ball.x *= oldS / S; ball.y *= oldS / S;
+    mouse.x *= oldS / S; mouse.y *= oldS / S;
+    initRope(); initWand();
+  }
+  cat.x = clamp(cat.x, 12, W - 12);
+  if (cat.state !== 'held') cat.y = cat.y >= oldFloor ? FLOOR : Math.min(cat.y, FLOOR);   // 原本站在地上就繼續站在地上
+  ball.x = clamp(ball.x, ball.r, W - ball.r);
+}
+let started = false;
+function watchDpr() {                                  // 改縮放、換到不同縮放的螢幕時重算倍率
+  matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+    .addEventListener('change', () => { resize(); watchDpr(); }, { once: true });
 }
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rand  = (a, b) => a + Math.random() * (b - a);
@@ -588,6 +610,7 @@ if (TAURI) {
   TAURI.event.listen('cursor', ({ payload }) => {
     const p = toWorld({ clientX: payload.x, clientY: payload.y });
     mouse.x = p.x; mouse.y = p.y;                      // 逗貓棒跟著游標，穿透時也收得到
+    if (wandStale) { wandStale = false; if (toy === 'wand') initWand(); }
     if (drag) return;                                  // 拖曳中不切換，否則會中途鬆手
     const hit = hitTest(p);
     setPassthrough(!hit);
@@ -603,6 +626,10 @@ if (TAURI) {
     if (t) setToy(t);
   });
 }
+
+/* 毛球模式時 Rust 只在游標進到長條才回報位置，所以剛換成逗貓棒時 mouse 可能還是舊的。
+   等第一個游標事件到了再把線放好，不然線會從舊位置甩過來。 */
+let wandStale = false;
 
 /* ═══ 互動：拖貓、甩球 ═══ */
 let drag = null;
@@ -662,6 +689,7 @@ function setQuiet(on) {                                // 系統匣的「安靜�
 function setToy(t) {                                   // 系統匣的「玩具」
   if (!['ball', 'laser', 'wand'].includes(t) || t === toy) return;
   toy = t; lastPrey = null;
+  if (TAURI && t !== 'ball') wandStale = true;
   if (t === 'wand') initWand();
   if (cat.y < FLOOR && ['pounce', 'leap', 'clutch'].includes(cat.state)) { cat.vx = cat.vy = 0; setState('fall', 999); }
   else if (!['sleep', 'held', 'fall'].includes(cat.state)) setState('stare', 40);
@@ -692,8 +720,10 @@ ball.x = W * 0.6; ball.y = FLOOR - ball.r;
 initRope();
 mouse.x = W * 0.7; mouse.y = 8;                        // 還沒收到游標位置前先放這裡
 initWand();
+started = true;
 setState('stare', 60);
 window.addEventListener('resize', resize);
+watchDpr();
 requestAnimationFrame(frame);
 </script>
 </body>
