@@ -69,6 +69,10 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![set_passthrough])
         .setup(|app| {
+            // macOS：不在 Dock 出現，只留選單列的貓咪圖示
+            #[cfg(target_os = "macos")]
+            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+
             let win = app
                 .get_webview_window("main")
                 .expect("找不到 main 視窗");

@@ -1,4 +1,4 @@
-name: 打包 Windows 安裝檔
+name: 打包 Windows、macOS 安裝檔
 
 on:
   # 推一個 v 或 V 開頭的標籤（例如 V0.1）就會自動觸發
@@ -15,8 +15,17 @@ permissions:
   contents: write   # 要能建立 Release 並上傳安裝檔
 
 jobs:
-  windows:
-    runs-on: windows-latest
+  build:
+    strategy:
+      fail-fast: false   # 一個平台失敗，另一個照樣打包
+      matrix:
+        include:
+          - platform: windows-latest
+            args: '--bundles nsis'
+          - platform: macos-latest
+            # 一個 .dmg 同時支援 M 系列和 Intel Mac
+            args: '--target universal-apple-darwin --bundles dmg'
+    runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
 
@@ -25,6 +34,8 @@ jobs:
           node-version: 22
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -38,5 +49,8 @@ jobs:
         with:
           tagName: ${{ inputs.tag || github.ref_name }}
           releaseName: '毛球貓 ${{ inputs.tag || github.ref_name }}'
-          releaseBody: '下載 YarnCat_x.x.x_x64-setup.exe，雙擊安裝。'
+          releaseBody: |
+            Windows：下載 YarnCat_x.x.x_x64-setup.exe，雙擊安裝。
+            macOS：下載 YarnCat_x.x.x_universal.dmg，把 YarnCat 拖進「應用程式」。第一次打開前要在「終端機」執行 `xattr -cr /Applications/YarnCat.app`（安裝檔沒有簽章）。
           releaseDraft: true
+          args: ${{ matrix.args }}
