@@ -1,6 +1,6 @@
 [package]
 name = "yarncat"
-version = "0.2.0"
+version = "0.3.0"
 description = "毛球貓：在螢幕底部玩毛球的桌寵"
 edition = "2021"
 

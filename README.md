@@ -2,7 +2,7 @@
 
 一隻住在螢幕底部的原創像素貓。你辦公，牠在旁邊玩毛球：盯著球、壓低身體扭屁股、飛撲、用前掌撥，玩累了就趴下睡覺。也可以換成雷射光或逗貓棒，用滑鼠陪牠玩。
 
-支援 Windows 10 / 11 和 macOS（M 系列、Intel 都可以）。
+支援 Windows 10 / 11。macOS 版（M 系列、Intel 都可以）是測試版，作者沒有 Mac 實際測過，有問題請到 [Issues](../../issues) 回報。
 
 ## 安裝
 
@@ -12,7 +12,7 @@
 2. 雙擊安裝。
 3. 因為安裝檔沒有程式碼簽章，Windows 可能會跳出「Windows 已保護您的電腦」。按「其他資訊」→「仍要執行」即可。
 
-### macOS
+### macOS（測試版）
 
 1. 到 [Releases](../../releases) 下載最新的 `YarnCat_x.x.x_universal.dmg`。
 2. 打開 dmg，把 YarnCat 拖進「應用程式」。

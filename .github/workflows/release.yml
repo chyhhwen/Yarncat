@@ -51,6 +51,30 @@ jobs:
           releaseName: '毛球貓 ${{ inputs.tag || github.ref_name }}'
           releaseBody: |
             Windows：下載 YarnCat_x.x.x_x64-setup.exe，雙擊安裝。
-            macOS：下載 YarnCat_x.x.x_universal.dmg，把 YarnCat 拖進「應用程式」。第一次打開前要在「終端機」執行 `xattr -cr /Applications/YarnCat.app`（安裝檔沒有簽章）。
+            macOS（測試版）：下載 YarnCat_x.x.x_universal.dmg，把 YarnCat 拖進「應用程式」。第一次打開前要在「終端機」執行 `xattr -cr /Applications/YarnCat.app`（安裝檔沒有簽章）。有問題請到 Issues 回報。
           releaseDraft: true
           args: ${{ matrix.args }}
+
+      # 沒有 Mac 可以測，所以在這台 macOS 機器上直接打開 app、拍一張螢幕截圖
+      - name: macOS 試跑並截圖
+        if: matrix.platform == 'macos-latest'
+        run: |
+          APP=$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          echo "打開 $APP"
+          open "$APP"
+          sleep 15
+          screencapture -x macos-screenshot.png
+          if pgrep -if yarncat > /dev/null; then
+            echo "app 還在執行"
+          else
+            echo "::error::app 沒有在執行，可能一打開就閃退了"
+            exit 1
+          fi
+
+      # 截圖放在這次執行的頁面最下面「Artifacts」，登入 GitHub 就能下載
+      - uses: actions/upload-artifact@v4
+        if: always() && matrix.platform == 'macos-latest'
+        with:
+          name: macos-screenshot
+          path: macos-screenshot.png
+          if-no-files-found: ignore
