@@ -5,7 +5,7 @@ use std::{thread, time::Duration};
 
 use serde::Serialize;
 use tauri::{
-    menu::{CheckMenuItem, Menu, MenuItem},
+    menu::{CheckMenuItem, Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
     Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
 };
@@ -77,11 +77,16 @@ fn main() {
             win.show()?;
             watch_cursor(win.clone());
 
-            // 系統匣：安靜模式（開會、分享螢幕時讓貓去睡）、結束
+            // 系統匣：換玩具、安靜模式（開會、分享螢幕時讓貓去睡）、結束
+            let toy_ball = CheckMenuItem::with_id(app, "toy:ball", "毛球", true, true, None::<&str>)?;
+            let toy_laser = CheckMenuItem::with_id(app, "toy:laser", "雷射光", true, false, None::<&str>)?;
+            let toy_wand = CheckMenuItem::with_id(app, "toy:wand", "逗貓棒", true, false, None::<&str>)?;
+            let toys = Submenu::with_items(app, "玩具", true, &[&toy_ball, &toy_laser, &toy_wand])?;
             let quiet = CheckMenuItem::with_id(app, "quiet", "安靜模式", true, false, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "結束毛球貓", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&quiet, &quit])?;
+            let menu = Menu::with_items(app, &[&toys, &quiet, &quit])?;
             let quiet_item = quiet.clone();
+            let toy_items = [toy_ball, toy_laser, toy_wand];
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().expect("缺少圖示").clone())
                 .tooltip("毛球貓")
@@ -92,6 +97,14 @@ fn main() {
                         let _ = app.emit("quiet", on);
                     }
                     "quit" => app.exit(0),
+                    // 玩具只能選一個：點到的打勾，其他取消
+                    id if id.starts_with("toy:") => {
+                        for item in &toy_items {
+                            let mine: &str = item.id().as_ref();
+                            let _ = item.set_checked(mine == id);
+                        }
+                        let _ = app.emit("toy", &id[4..]);
+                    }
                     _ => {}
                 })
                 .build(app)?;

@@ -79,37 +79,94 @@ function updateBall() {
   // 線頭：第 0 點黏在球的表面，其餘點自由擺動
   rope[0].x = ball.x + Math.cos(ball.a + Math.PI) * ball.r;
   rope[0].y = ball.y + Math.sin(ball.a + Math.PI) * ball.r;
-  for (let i = 1; i < rope.length; i++) {
-    const p = rope[i];
+  stepRope(rope, SEG);
+}
+
+function stepRope(pts, seg) {                         // 第 0 點由呼叫者固定，其餘點用 Verlet 積分
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i];
     const vx = (p.x - p.px) * 0.98, vy = (p.y - p.py) * 0.98;
     p.px = p.x; p.py = p.y;
     p.x += vx; p.y += vy + 0.12;
     if (p.y > FLOOR - 0.5) { p.y = FLOOR - 0.5; p.px = p.x - vx * 0.6; }
   }
   for (let k = 0; k < 4; k++) {                       // 讓每段維持固定長度
-    for (let i = 0; i < rope.length - 1; i++) {
-      const a = rope[i], b = rope[i + 1];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
       const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy) || 0.001;
-      const diff = (d - SEG) / d;
+      const diff = (d - seg) / d;
       if (i === 0) { b.x -= dx * diff; b.y -= dy * diff; }
       else { a.x += dx * diff / 2; a.y += dy * diff / 2; b.x -= dx * diff / 2; b.y -= dy * diff / 2; }
     }
   }
 }
 
+/* ═══ 雷射光：紅點就照在滑鼠游標的位置 ═══ */
+const laser = { x: 0, y: 0 };
+
+function updateLaser() {
+  laser.x = mouse.x;
+  laser.y = Math.min(mouse.y, FLOOR - 1);              // 照不到地板以下
+}
+
+/* ═══ 逗貓棒：棍子握在滑鼠游標上，垂下一條線，末端綁羽毛 ═══ */
+const mouse = { x: -99, y: -99 };                      // 游標位置（遊戲像素），視窗外也會更新
+const wand = [];
+const WSEG = 2.5;
+
+function initWand() {
+  wand.length = 0;
+  for (let i = 0; i < 9; i++) {
+    const x = mouse.x, y = mouse.y + i * WSEG;
+    wand.push({ x, y, px: x, py: y });
+  }
+}
+function updateWand() {
+  wand[0].x = mouse.x; wand[0].y = mouse.y;
+  stepRope(wand, WSEG);
+}
+
 /* ═══ 貓的大腦：狀態機 ═══ */
 const ZH = { sit: '坐著', lick: '舔毛', stare: '盯著毛球', walk: '散步', chase: '追毛球',
   crouch: '壓低準備撲', pounce: '飛撲', swipe: '用前掌撥', sleep: '睡覺', held: '被拎起來', fall: '掉下來' };
 const RATE = { sit: 20, lick: 9, stare: 30, walk: 9, chase: 5, crouch: 6, pounce: 99,
-  swipe: 14, sleep: 40, held: 10, fall: 10 };          // 幾格換一張動畫
+  swipe: 14, sleep: 40, held: 10, fall: 10,
+  hunt: 5, aim: 6, leap: 99, clutch: 12, slap: 14 };   // 幾格換一張動畫
 const cat = { x: 0, y: 0, vx: 0, vy: 0, dir: 1, state: 'sit', t: 0, dur: 60, frame: 0,
-  energy: 80, target: 0 };
+  energy: 80, target: 0, high: false, got: false, low: false };
 let quiet = false;
+let toy = 'ball';                                      // 'ball' 毛球、'laser' 雷射光、'wand' 逗貓棒
+const REACH = 44;                                      // 跳起來前掌最高搆得到離地多高
 
 function setState(s, dur = 60) {
   cat.state = s; cat.t = 0; cat.dur = dur; cat.frame = 0;
 }
-function faceBall() { const d = ball.x - cat.x; if (Math.abs(d) > 1) cat.dir = Math.sign(d); }
+function prey() {                                      // 貓現在盯著的東西在哪
+  if (toy === 'laser') return { x: laser.x, y: laser.y };
+  if (toy === 'wand') { const e = wand[wand.length - 1]; return { x: e.x, y: e.y }; }
+  return { x: ball.x, y: ball.y };
+}
+let lastPrey = null;
+function faceBall() { const d = prey().x - cat.x; if (Math.abs(d) > 1) cat.dir = Math.sign(d); }
+function pawHit(p) {                                   // 跳躍中的前掌碰到 p 了嗎？
+  if (!cat.high) return Math.hypot(p.x - (cat.x + cat.dir * 12), p.y - (cat.y - 7)) < 6;
+  // 往上伸直時整條前腳（離地 12～31）都算
+  return Math.abs(p.x - (cat.x + cat.dir * 7)) < 5 && p.y >= cat.y - 31 && p.y <= cat.y - 12;
+}
+function leap(p) {                                     // 朝雷射光／羽毛起跳
+  const h = FLOOR - p.y, d = p.x - cat.x;
+  cat.high = h > 10;
+  if (cat.high) {                                      // 往上跳：跳到最高點時前掌剛好碰到
+    cat.vy = -Math.sqrt(2 * G * clamp(h - 26, 3, 20));
+    cat.vx = clamp((d - cat.dir * 8) / (-cat.vy / G), -1.6, 1.6);
+  } else {                                             // 東西在地上：往前撲
+    cat.vy = -1.6;
+    cat.vx = clamp((d - cat.dir * 12) / (2 * 1.6 / G), -1.6, 1.6);
+  }
+  cat.got = false;
+  cat.energy -= 3;
+  setState('leap', 999);
+}
 function kick(power, up) {
   ball.vx = cat.dir * power; ball.vy = -up;
   cat.energy -= 5;
@@ -123,7 +180,7 @@ function nextIdle() {                                  // 閒著的時候要做�
   if (quiet) return setState('sleep', 600);
   if (cat.energy < 20) return setState('sleep', rand(600, 900));
   const r = Math.random();
-  if (r < 0.45 && cat.energy > 30) return setState('stare', rand(40, 90));
+  if (r < (toy === 'ball' ? 0.45 : 0.7) && cat.energy > 30) return setState('stare', rand(40, 90));
   if (r < 0.65) return setState('lick', rand(90, 150));
   if (r < 0.80) { cat.target = rand(14, W - 14); return setState('walk', 400); }
   setState('sit', rand(120, 240));
@@ -132,21 +189,29 @@ function nextIdle() {                                  // 閒著的時候要做�
 function updateCat() {
   cat.t++;
   if (cat.t % RATE[cat.state] === 0) cat.frame++;
-  const d = ball.x - cat.x;
+  const p = prey();
+  p.vx = lastPrey ? p.x - lastPrey.x : 0;
+  p.vy = lastPrey ? p.y - lastPrey.y : 0;
+  lastPrey = { x: p.x, y: p.y };
+  const d = p.x - cat.x;
   const ballOnGround = ball.y >= FLOOR - ball.r - 1;
   const ballSpeed = Math.hypot(ball.vx, ball.vy);
+  const lively = toy === 'ball' ? ballSpeed > 0.8 && Math.abs(d) < 70
+                                : Math.hypot(p.vx, p.vy) > 0.6 && Math.abs(d) < 160;
 
   switch (cat.state) {
     case 'sit': case 'lick':
       cat.energy = Math.min(100, cat.energy + 0.005);
-      if (!quiet && cat.energy > 25 && ballSpeed > 0.8 && Math.abs(d) < 70 && Math.random() < 0.03)
+      if (!quiet && cat.energy > 25 && lively && Math.random() < 0.03)
         setState('stare', rand(15, 30));
       else if (cat.t > cat.dur) nextIdle();
       break;
 
     case 'stare':
       faceBall();
-      if (cat.t > cat.dur) {
+      if (toy !== 'ball') {                            // 雷射光、逗貓棒：看夠了就追
+        if (cat.t > cat.dur) setState(cat.energy > 20 ? 'hunt' : 'sit', cat.energy > 20 ? 600 : 120);
+      } else if (cat.t > cat.dur) {
         if (Math.abs(d) > 13) setState('chase', 480);
         else if (ballOnGround && ballSpeed < 0.5 && Math.random() < 0.6) setState('swipe', 30);
         else setState('crouch', rand(35, 70));
@@ -204,6 +269,54 @@ function updateCat() {
         if (Math.abs(ball.x - paw) < 7 && ball.y > FLOOR - 14) kick(rand(0.8, 1.6), rand(0.2, 0.8));
       }
       if (cat.t > cat.dur) setState(cat.energy > 25 ? 'stare' : 'sit', rand(40, 80));
+      break;
+
+    /* ── 以下是雷射光、逗貓棒用的狀態：追 → 壓低 → 跳起來拍／抓 ── */
+    case 'hunt': {
+      faceBall();
+      cat.energy -= 0.04;
+      const tx = clamp(p.x, 12, W - 12);               // 東西在畫面外時，追到邊邊就好
+      const reachable = FLOOR - p.y <= REACH && Math.abs(p.x - tx) < 8;
+      if (cat.energy < 12 || cat.t > cat.dur) setState('sit', 120);
+      else if (Math.abs(tx - cat.x) > 9) cat.x += cat.dir * Math.min(toy === 'laser' ? 1.25 : 1.05, Math.abs(tx - cat.x) - 8);
+      else if (!reachable) setState('stare', rand(20, 40));   // 太高搆不到，坐著仰頭看
+      else setState('aim', FLOOR - p.y > 10 ? rand(8, 20) : rand(12, 30));
+      break;
+    }
+
+    case 'aim':
+      faceBall();
+      if (Math.abs(d) > 20) setState('hunt', 600);    // 跑掉了，再追
+      else if (cat.t > cat.dur) leap(p);
+      break;
+
+    case 'leap':
+      cat.vy += G; cat.x += cat.vx; cat.y += cat.vy;
+      if (!cat.got && pawHit(p)) {
+        cat.got = true;
+        if (toy === 'wand') { setState('clutch', rand(60, 150)); break; }
+      }
+      if (cat.y >= FLOOR) {
+        cat.y = FLOOR; cat.vx = cat.vy = 0;
+        if (toy === 'laser') setState('slap', 36);    // 雷射光抓不到：落地後按著地板，看看掌心底下有沒有
+        else setState('stare', rand(10, 25));
+      }
+      break;
+
+    case 'clutch': {                                   // 抓住羽毛，被逗貓棒吊著晃
+      cat.low = p.y > FLOOR - 14;
+      cat.x += (p.x - cat.dir * (cat.low ? 11 : 8) - cat.x) * 0.3;
+      const hang = p.y + 28;
+      cat.y = cat.low ? FLOOR : Math.min(FLOOR, hang);
+      if (Math.hypot(p.vx, p.vy) > 3 || hang < 32 || cat.t > cat.dur) {   // 甩太快、拉太高或玩夠了就鬆手
+        cat.vx = cat.vy = 0;
+        if (cat.y < FLOOR) setState('fall', 999); else setState('stare', rand(20, 40));
+      }
+      break;
+    }
+
+    case 'slap':
+      if (cat.t > cat.dur) setState(cat.energy > 25 ? 'stare' : 'sit', rand(15, 40));
       break;
 
     case 'sleep':
@@ -324,9 +437,33 @@ function heldPose(f) {
     [-3 + s, -5, 2, 1, 'W'], [2 + s, -5, 2, 1, 'W']];
   return [parts, det];
 }
+function leapPose(mode) {                              // 用後腳撐起、身體拉直、前掌舉過頭
+  const hold = mode === 'hold';                        // hold：兩隻前掌抱住羽毛
+  const parts = [
+    [-7, -9, 2, 4, 'F'], [-9, -6, 2, 3, 'F'],         // 尾巴垂在後面
+    [-4, -4, 2, 4, 'F'], [0, -4, 2, 4, 'F'],          // 後腳
+    [-5, -15, 8, 11, 'F'],                             // 身體
+    [-2, -22, 8, 7, 'F'], [-2, -24, 2, 2, 'F'], [3, -24, 2, 2, 'F'],   // 頭、耳朵
+    [6, -28, 2, 13, 'F'], hold ? [7, -28, 2, 11, 'F'] : [8, -27, 2, 9, 'F'],   // 前腳
+  ];
+  const det = [
+    [0, -14, 3, 9, 'W'], [3, -18, 3, 2, 'W'], [5, -18, 1, 1, 'P'],
+    [-3, -13, 1, 3, 'D'], [-3, -9, 1, 2, 'D'], [-1, -23, 1, 1, 'P'], [4, -23, 1, 1, 'P'],
+    [6, -28, 2, 1, 'W'], hold ? [7, -28, 2, 1, 'W'] : [8, -27, 2, 1, 'W'],
+    [-4, -1, 2, 1, 'W'], [0, -1, 2, 1, 'W'],
+  ];
+  if (hold) det.push([2, -20, 3, 1, 'E']);              // 抓到了，瞇眼
+  else det.push([2, -21, 2, 1, 'G'], [2, -20, 2, 1, 'E']);
+  return [parts, det];
+}
 function currentPose() {
   const f = cat.frame;
   switch (cat.state) {
+    case 'hunt': return standPose(f);
+    case 'aim': return crouchPose(f);
+    case 'leap': return cat.high ? leapPose('reach') : pouncePose();
+    case 'clutch': return cat.low ? crouchPose(0) : leapPose('hold');
+    case 'slap': return sitPose(f, 'swipe');
     case 'stare': return sitPose(f, 'stare');
     case 'swipe': return sitPose(f, 'swipe');
     case 'lick': return lickPose(f);
@@ -342,7 +479,7 @@ function currentPose() {
 function drawCat() {
   const [parts, det] = currentPose();
   const ox = Math.round(cat.x);
-  const oy = Math.round(cat.y) - (cat.state === 'chase' && cat.frame % 2 ? 1 : 0);
+  const oy = Math.round(cat.y) - ((cat.state === 'chase' || cat.state === 'hunt') && cat.frame % 2 ? 1 : 0);
   const X = (x, w) => cat.dir > 0 ? ox + x : ox - x - w;
   ctx.fillStyle = C.O;
   for (const [x, y, w, h] of parts) ctx.fillRect(X(x - 1, w + 2), oy + y - 1, w + 2, h + 2);
@@ -372,6 +509,28 @@ function drawBall() {
     ctx.fillRect(cx + dx, cy + dy, 1, 1);
   }
 }
+function drawLaser() {                                 // 紅點加一圈半透明的光暈
+  const x = Math.round(laser.x), y = Math.round(laser.y);
+  ctx.fillStyle = '#ff2b2b';
+  ctx.globalAlpha = 0.35;
+  ctx.fillRect(x - 2, y - 1, 5, 3); ctx.fillRect(x - 1, y - 2, 3, 5);
+  ctx.globalAlpha = 1;
+  ctx.fillRect(x - 1, y, 3, 1); ctx.fillRect(x, y - 1, 1, 3);
+  ctx.fillStyle = '#ffd6d6';
+  ctx.fillRect(x, y, 1, 1);
+}
+function drawWand() {
+  const mx = Math.round(mouse.x), my = Math.round(mouse.y);
+  ctx.fillStyle = '#8b5a2b';                           // 握在游標上的棍子
+  line(mx - 7, my - 5, mx, my);
+  ctx.fillStyle = '#d9d4c7';                           // 線
+  for (let i = 0; i < wand.length - 1; i++) line(wand[i].x, wand[i].y, wand[i + 1].x, wand[i + 1].y);
+  const e = wand[wand.length - 1], ex = Math.round(e.x), ey = Math.round(e.y);
+  const feather = [[-1, 0, 3, 2, '#e86fa8'], [0, 2, 2, 3, '#f2a1c7'], [-2, 1, 1, 3, '#58b8c4'], [2, 1, 1, 3, '#58b8c4']];
+  ctx.fillStyle = C.O;
+  for (const [x, y, w, h] of feather) ctx.fillRect(ex + x - 1, ey + y - 1, w + 2, h + 2);
+  for (const [x, y, w, h, c] of feather) { ctx.fillStyle = c; ctx.fillRect(ex + x, ey + y, w, h); }
+}
 function drawRope() {
   ctx.fillStyle = C.Yd;
   for (let i = 0; i < rope.length - 1; i++) line(rope[i].x, rope[i].y, rope[i + 1].x, rope[i + 1].y);
@@ -394,7 +553,12 @@ function catBox() {
   switch (cat.state) {
     case 'sleep': return { x0: x - 12, y0: y - 14, x1: x + 12, y1: y + 1 };
     case 'held': case 'fall': return { x0: x - 7, y0: y - 30, x1: x + 8, y1: y + 1 };
-    case 'sit': case 'stare': case 'lick': case 'swipe': return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+    case 'sit': case 'stare': case 'lick': case 'swipe': case 'slap': return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+    case 'leap': case 'clutch': {
+      const upright = cat.state === 'leap' ? cat.high : !cat.low;
+      if (upright) return { x0: x - 11, y0: y - 30, x1: x + 11, y1: y + 1 };
+      return { x0: x - 19, y0: y - 18, x1: x + 19, y1: y + 1 };
+    }
     default: return { x0: x - 19, y0: y - 18, x1: x + 19, y1: y + 1 };
   }
 }
@@ -406,7 +570,7 @@ function toWorld(e) {
 }
 function hitTest(p) {
   if (inBox(p, catBox())) return 'cat';
-  if (inBox(p, ballBox())) return 'ball';
+  if (toy === 'ball' && inBox(p, ballBox())) return 'ball';   // 雷射光、逗貓棒不擋滑鼠
   return null;
 }
 
@@ -422,14 +586,22 @@ function setPassthrough(on) {
 }
 if (TAURI) {
   TAURI.event.listen('cursor', ({ payload }) => {
+    const p = toWorld({ clientX: payload.x, clientY: payload.y });
+    mouse.x = p.x; mouse.y = p.y;                      // 逗貓棒跟著游標，穿透時也收得到
     if (drag) return;                                  // 拖曳中不切換，否則會中途鬆手
-    const hit = hitTest(toWorld({ clientX: payload.x, clientY: payload.y }));
+    const hit = hitTest(p);
     setPassthrough(!hit);
     document.body.classList.toggle('grab', !!hit);
   });
   TAURI.event.listen('quiet', ({ payload }) => setQuiet(!!payload));
+  TAURI.event.listen('toy', ({ payload }) => setToy(payload));
 } else {
   document.body.classList.add('browser');
+  // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒
+  window.addEventListener('keydown', e => {
+    const t = { 1: 'ball', 2: 'laser', 3: 'wand' }[e.key];
+    if (t) setToy(t);
+  });
 }
 
 /* ═══ 互動：拖貓、甩球 ═══ */
@@ -447,6 +619,7 @@ window.addEventListener('pointerdown', e => {
   document.body.classList.add('grabbing');
 });
 window.addEventListener('pointermove', e => {
+  if (!TAURI) { const p = toWorld(e); mouse.x = p.x; mouse.y = p.y; }
   if (drag && e.pointerId === drag.id) { moveDrag(e); return; }
   if (!TAURI) document.body.classList.toggle('grab', !!hitTest(toWorld(e)));
 });
@@ -482,17 +655,34 @@ window.addEventListener('pointercancel', endDrag);
 
 function setQuiet(on) {                                // 系統匣的「安靜模式」
   quiet = on;
-  if (quiet && !['held', 'fall', 'pounce'].includes(cat.state)) setState('sleep', 600);
+  if (quiet && !['held', 'fall', 'pounce', 'leap', 'clutch'].includes(cat.state)) setState('sleep', 600);
   if (!quiet && cat.state === 'sleep') setState('sit', 90);
+}
+
+function setToy(t) {                                   // 系統匣的「玩具」
+  if (!['ball', 'laser', 'wand'].includes(t) || t === toy) return;
+  toy = t; lastPrey = null;
+  if (t === 'wand') initWand();
+  if (cat.y < FLOOR && ['pounce', 'leap', 'clutch'].includes(cat.state)) { cat.vx = cat.vy = 0; setState('fall', 999); }
+  else if (!['sleep', 'held', 'fall'].includes(cat.state)) setState('stare', 40);
 }
 
 /* ═══ 遊戲迴圈：固定每秒 60 次更新，畫面跟著螢幕刷新 ═══ */
 let acc = 0, lastT = performance.now();
 function frame(now) {
   acc += Math.min(now - lastT, 100); lastT = now;
-  while (acc >= 1000 / 60) { updateBall(); updateCat(); acc -= 1000 / 60; }
+  while (acc >= 1000 / 60) {
+    if (toy === 'ball') updateBall();
+    else if (toy === 'laser') updateLaser();
+    else updateWand();
+    updateCat();
+    acc -= 1000 / 60;
+  }
   ctx.clearRect(0, 0, W, H);
-  drawRope(); drawBall(); drawCat();
+  if (toy === 'ball') { drawRope(); drawBall(); }
+  drawCat();
+  if (toy === 'laser') drawLaser();                    // 紅點照在貓身上，所以畫在貓上面
+  if (toy === 'wand') drawWand();
   requestAnimationFrame(frame);
 }
 
@@ -500,6 +690,8 @@ resize();
 cat.x = W * 0.35; cat.y = FLOOR;
 ball.x = W * 0.6; ball.y = FLOOR - ball.r;
 initRope();
+mouse.x = W * 0.7; mouse.y = 8;                        // 還沒收到游標位置前先放這裡
+initWand();
 setState('stare', 60);
 window.addEventListener('resize', resize);
 requestAnimationFrame(frame);
