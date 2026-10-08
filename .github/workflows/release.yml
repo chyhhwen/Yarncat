@@ -60,8 +60,26 @@ jobs:
       - name: macOS 試跑並截圖
         if: matrix.platform == 'macos-latest'
         run: |
-          APP=$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -maxdepth 1 -name '*.app' | head -1)
+          # 從打包好的 dmg 裡拿出 app，測的就是使用者下載到的東西
+          DMG=$(find src-tauri/target -name '*.dmg' | head -1)
+          if [ -z "$DMG" ]; then
+            echo "::error::找不到 dmg"
+            find src-tauri/target -maxdepth 5 -path '*bundle*'
+            exit 1
+          fi
+          echo "掛載 $DMG"
+          WORK="$RUNNER_TEMP/yarncat"
+          mkdir -p "$WORK/app"
+          hdiutil attach -nobrowse -readonly -mountpoint "$WORK/dmg" "$DMG"
+          cp -R "$WORK"/dmg/*.app "$WORK/app/"
+          hdiutil detach "$WORK/dmg" || true
+          APP=$(find "$WORK/app" -maxdepth 1 -name '*.app' | head -1)
           BIN=$(find "$APP/Contents/MacOS" -type f -perm +111 | head -1)
+          if [ -z "$BIN" ]; then
+            echo "::error::dmg 裡找不到 app 的執行檔"
+            ls -R "$WORK/app" | head -50
+            exit 1
+          fi
           echo "執行 $BIN"
           RUST_BACKTRACE=1 "$BIN" > macos-app.log 2>&1 &
           PID=$!
