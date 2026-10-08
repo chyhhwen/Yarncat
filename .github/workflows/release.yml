@@ -51,6 +51,9 @@ jobs:
           releaseName: '毛球貓 ${{ inputs.tag || github.ref_name }}'
           releaseBody: |
             Windows：下載 YarnCat_x.x.x_x64-setup.exe，雙擊安裝。
+            安裝檔沒有簽章。出現「Windows 已保護您的電腦」時，
+            按「其他資訊」→「仍要執行」。出現「智慧型應用程式控制
+            已封鎖」時沒有略過的按鈕，處理方式請看 README 的「安裝」一節。
             macOS（測試版）：下載 YarnCat_x.x.x_universal.dmg，把 YarnCat 拖進「應用程式」。第一次打開前要在「終端機」執行 `xattr -cr /Applications/YarnCat.app`（安裝檔沒有簽章）。有問題請到 Issues 回報。
           releaseDraft: true
           args: ${{ matrix.args }}
