@@ -1,6 +1,6 @@
 # 毛球貓 YarnCat
 
-一隻住在螢幕底部的原創像素貓。你辦公，牠在旁邊玩毛球：盯著球、壓低身體扭屁股、飛撲、用前掌撥，玩累了就趴下睡覺。
+一隻住在螢幕底部的原創像素貓。你辦公，牠在旁邊玩毛球：盯著球、壓低身體扭屁股、飛撲、用前掌撥，玩累了就趴下睡覺。也可以換成雷射光或逗貓棒，用滑鼠陪牠玩。
 
 目前只支援 Windows 10 / 11。
 
@@ -30,9 +30,10 @@
 | 透明長條視窗 | `src-tauri/tauri.conf.json` | 透明、無邊框、置頂、不出現在工作列 |
 | 擺放位置 | `src-tauri/src/main.rs` `place_strip` | 依螢幕扣掉工作列的範圍，擺在最底部 |
 | 點擊穿透 | `main.rs` `watch_cursor` + `src/index.html` `hitTest` | Rust 每 16ms 回報游標位置，前端判斷在不在貓或毛球上，再開關穿透 |
-| 貓的行為 | `src/index.html` `updateCat` | 狀態機：坐、舔毛、盯、追、撲、撥、睡 |
+| 貓的行為 | `src/index.html` `updateCat` | 狀態機：坐、舔毛、盯、追、撲、撥、睡；雷射光、逗貓棒另外有追、壓低、跳起來拍、抓住吊著 |
 | 毛球 | `src/index.html` `updateBall` | 重力、摩擦、反彈，線頭用 Verlet 積分 |
 | 雷射光、逗貓棒 | `src/index.html` `updateLaser`、`updateWand` | 紅點、逗貓棒的線都掛在游標上（`watch_cursor` 回報的位置） |
+| 系統匣選單 | `src-tauri/src/main.rs` `main` | 換玩具、安靜模式、結束，用事件通知前端 |
 
 直接用瀏覽器打開 `src/index.html` 也能玩（沒有點擊穿透），改行為時這樣測最快。按 `1` `2` `3` 切換毛球、雷射光、逗貓棒。
 
