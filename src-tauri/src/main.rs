@@ -158,22 +158,20 @@ fn watch_cursor(win: WebviewWindow) {
                 placer.check(&win);
                 strip = actual_rect(&win);
             }
-            let (Some((left, top, w, h)), Ok(c)) = (strip, win.cursor_position()) else {
+            let Some((left, top, w, h)) = strip else {
                 continue;
             };
-            let inside = c.x >= left as f64
-                && c.x < left as f64 + w as f64
-                && c.y >= top as f64
-                && c.y < top as f64 + h as f64;
+            // 實體像素，不除縮放比例（見 Cursor 的說明）
+            let Some((x, y)) = cursor_in_strip(&win, (left, top)) else {
+                continue;
+            };
+            let inside = x >= 0.0 && x < w as f64 && y >= 0.0 && y < h as f64;
             // 毛球模式：游標在長條外就不回報，只在剛離開時補一次，讓前端把穿透打開
             let report = FOLLOW_EVERYWHERE.load(Ordering::Relaxed) || inside || was_inside;
             was_inside = inside;
             if !report {
                 continue;
             }
-            // 實體像素，不除縮放比例（見 Cursor 的說明）
-            let x = c.x - left as f64;
-            let y = c.y - top as f64;
             if (x, y) == last {
                 continue;
             }
@@ -181,6 +179,86 @@ fn watch_cursor(win: WebviewWindow) {
             let _ = win.emit("cursor", Cursor { x, y });
         }
     });
+}
+
+/// 游標相對於長條左上角的位置，單位是長條所在螢幕的實體像素。
+/// Windows 的游標、視窗座標都是實體像素，直接相減就好。
+#[cfg(not(target_os = "macos"))]
+fn cursor_in_strip(win: &WebviewWindow, (left, top): (i32, i32)) -> Option<(f64, f64)> {
+    let c = win.cursor_position().ok()?;
+    Some((c.x - left as f64, c.y - top as f64))
+}
+
+/// macOS 不能用 cursor_position：tao 把游標座標乘上「主螢幕」的縮放比例，
+/// 視窗位置卻乘上「視窗所在螢幕」的比例（tao 0.37 macos/util/mod.rs 的 cursor_position；tauri#7890）。
+/// 長條放在縮放比例跟主螢幕不同的螢幕時，兩邊單位不同，紅點會差好幾百點。
+/// 所以直接問 AppKit 游標在這個視窗裡的哪裡，完全不經過 tao 的換算。
+/// AppKit 的視窗只能在主執行緒碰，丟到主執行緒做完再把結果帶回來。
+#[cfg(target_os = "macos")]
+fn cursor_in_strip(win: &WebviewWindow, _origin: (i32, i32)) -> Option<(f64, f64)> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let w = win.clone();
+    win.run_on_main_thread(move || {
+        let pos = w
+            .ns_view()
+            .ok()
+            .and_then(|view| unsafe { appkit::cursor_in_window(view.cast()) });
+        let _ = tx.send(pos);
+    })
+    .ok()?;
+    rx.recv().ok().flatten()
+}
+
+#[cfg(target_os = "macos")]
+mod appkit {
+    use objc2::encode::{Encode, Encoding};
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    // AppKit 回傳的結構，欄位要照 C 的排列（有些欄位用不到）。macOS 只有 64 位元，CGFloat 就是 f64
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+    unsafe impl Encode for CGPoint {
+        const ENCODING: Encoding = Encoding::Struct("CGPoint", &[f64::ENCODING, f64::ENCODING]);
+    }
+
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct CGSize {
+        width: f64,
+        height: f64,
+    }
+    unsafe impl Encode for CGSize {
+        const ENCODING: Encoding = Encoding::Struct("CGSize", &[f64::ENCODING, f64::ENCODING]);
+    }
+
+    #[allow(dead_code)]
+    #[repr(C)]
+    struct CGRect {
+        origin: CGPoint,
+        size: CGSize,
+    }
+    unsafe impl Encode for CGRect {
+        const ENCODING: Encoding = Encoding::Struct("CGRect", &[CGPoint::ENCODING, CGSize::ENCODING]);
+    }
+
+    /// 游標相對於視窗左上角的位置，單位是視窗所在螢幕的實體像素。
+    /// view 是視窗的內容 view；只能在主執行緒呼叫。
+    pub unsafe fn cursor_in_window(view: *mut AnyObject) -> Option<(f64, f64)> {
+        let window: *mut AnyObject = msg_send![view, window];
+        if window.is_null() {
+            return None;
+        }
+        // AppKit 的視窗座標原點在左下角、往上為正，單位是點。長條沒有標題列，視窗外框就是內容範圍
+        let p: CGPoint = msg_send![window, mouseLocationOutsideOfEventStream];
+        let frame: CGRect = msg_send![window, frame];
+        let scale: f64 = msg_send![window, backingScaleFactor];
+        Some((p.x * scale, (frame.size.height - p.y) * scale))
+    }
 }
 
 fn main() {

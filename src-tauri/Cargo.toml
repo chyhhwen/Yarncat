@@ -1,6 +1,6 @@
 [package]
 name = "yarncat"
-version = "0.5.1"
+version = "0.5.2"
 description = "毛球貓：在螢幕底部玩毛球的桌寵"
 edition = "2021"
 
@@ -10,6 +10,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
+
+# macOS 直接向 AppKit 問游標在視窗裡的位置（見 main.rs 的 cursor_in_strip）；跟 Tauri 用同一版
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
 
 [profile.release]
 strip = true
