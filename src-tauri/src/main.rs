@@ -130,47 +130,37 @@ impl Placer {
     }
 }
 
+/// 游標相對於長條左上角的位置，單位是實體像素。
+/// 不在這裡用視窗的 scale_factor 換成 CSS 像素：切到縮放比例不同的螢幕後，
+/// 它和 WebView 實際用的倍率不一定一致（WebView2 還會乘上 Windows 的「文字大小」），
+/// 一不一致，紅點、逗貓棒就會跟游標等比例錯開。換算交給前端用自己的 devicePixelRatio。
 #[derive(Clone, Serialize)]
 struct Cursor {
     x: f64,
     y: f64,
 }
 
-/// 換算游標座標要用的視窗資訊：左上角、大小（實體像素）、縮放比例
-struct Geometry {
-    rect: Rect,
-    scale: f64,
-}
-
-fn read_geometry(win: &WebviewWindow) -> Option<Geometry> {
-    Some(Geometry {
-        rect: actual_rect(win)?,
-        scale: win.scale_factor().ok()?,
-    })
-}
-
-/// 視窗穿透時收不到任何滑鼠事件，所以由這裡主動輪詢游標位置，轉成視窗內座標交給前端。
+/// 視窗穿透時收不到任何滑鼠事件，所以由這裡主動輪詢游標位置，轉成相對於長條的位置交給前端。
 /// 順便每秒檢查一次長條有沒有擺對位置。
 fn watch_cursor(win: WebviewWindow) {
     thread::spawn(move || {
         let mut last = (f64::NAN, f64::NAN);
         let mut was_inside = false;
         let mut placer = Placer { want: None, retries: 0 };
-        let mut geo = read_geometry(&win);
+        let mut strip = actual_rect(&win);
         let mut tick: u32 = 0;
         loop {
             thread::sleep(Duration::from_millis(16));
             tick = tick.wrapping_add(1);
-            // 視窗位置、大小、縮放只有重擺時才會變，每秒讀一次就好，不用每格都問
+            // 視窗位置、大小只有重擺時才會變，每秒讀一次就好，不用每格都問
             let now = PLACE_NOW.swap(false, Ordering::Relaxed);
             if now || tick % PLACE_CHECK_TICKS == 0 {
                 placer.check(&win);
-                geo = read_geometry(&win);
+                strip = actual_rect(&win);
             }
-            let (Some(g), Ok(c)) = (&geo, win.cursor_position()) else {
+            let (Some((left, top, w, h)), Ok(c)) = (strip, win.cursor_position()) else {
                 continue;
             };
-            let (left, top, w, h) = g.rect;
             let inside = c.x >= left as f64
                 && c.x < left as f64 + w as f64
                 && c.y >= top as f64
@@ -181,8 +171,9 @@ fn watch_cursor(win: WebviewWindow) {
             if !report {
                 continue;
             }
-            let x = (c.x - left as f64) / g.scale;
-            let y = (c.y - top as f64) / g.scale;
+            // 實體像素，不除縮放比例（見 Cursor 的說明）
+            let x = c.x - left as f64;
+            let y = c.y - top as f64;
             if (x, y) == last {
                 continue;
             }

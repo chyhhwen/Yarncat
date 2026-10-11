@@ -49,9 +49,11 @@ function resize() {
   cv.style.width = W * S + 'px'; cv.style.height = H * S + 'px';
   FLOOR = H - 2;
   if (!started) return;                                // 開場時位置還沒擺，下面不用調
+  // 游標：有 Rust 回報的實體座標就照新的倍率重算，滑鼠沒動也對得準；瀏覽器測試時照比例換算
+  if (TAURI && lastCursor) Object.assign(mouse, cursorToWorld(lastCursor));
+  else if (S !== oldS) { mouse.x *= oldS / S; mouse.y *= oldS / S; }
   if (S !== oldS) {                                    // 倍率變了：維持在螢幕上的同一個位置
     cat.x *= oldS / S; ball.x *= oldS / S; ball.y *= oldS / S;
-    mouse.x *= oldS / S; mouse.y *= oldS / S;
     initRope(); initWand();
   }
   cat.x = clamp(cat.x, 12, W - 12);
@@ -606,9 +608,18 @@ function setPassthrough(on) {
   passthrough = on;
   TAURI.core.invoke('set_passthrough', { on });
 }
+/* Rust 回報的是游標相對於視窗左上角的「實體像素」，這裡用 WebView 自己的 devicePixelRatio 換成 CSS 像素。
+   不用 Rust 那邊視窗的縮放比例：切到縮放不同的螢幕後兩者不一定一致，用錯倍率，
+   紅點、逗貓棒就會跟游標等比例錯開，離左邊越遠偏越多。 */
+let lastCursor = null;                                 // 最後一次回報的游標（實體像素），倍率變了要重算
+function cursorToWorld(c) {
+  const dpr = window.devicePixelRatio || 1;
+  return toWorld({ clientX: c.x / dpr, clientY: c.y / dpr });
+}
 if (TAURI) {
   TAURI.event.listen('cursor', ({ payload }) => {
-    const p = toWorld({ clientX: payload.x, clientY: payload.y });
+    lastCursor = payload;
+    const p = cursorToWorld(payload);
     mouse.x = p.x; mouse.y = p.y;                      // 逗貓棒跟著游標，穿透時也收得到
     if (wandStale) { wandStale = false; if (toy === 'wand') initWand(); }
     if (drag) return;                                  // 拖曳中不切換，否則會中途鬆手
