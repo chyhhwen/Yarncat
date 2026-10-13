@@ -162,7 +162,7 @@ const ZH = { sit: '坐著', lick: '舔毛', stare: '盯著毛球', walk: '散步
 const RATE = { sit: 20, lick: 9, stare: 30, walk: 9, chase: 5, crouch: 6, pounce: 99,
   swipe: 14, sleep: 40, held: 10, fall: 10,
   hunt: 5, aim: 6, leap: 99, clutch: 12, slap: 14, loaf: 12, flop: 18,
-  beg: 20, drool: 15, pet: 10, fetch: 9, eat: 10 };   // 幾格換一張動畫
+  beg: 20, drool: 15, dream: 20, pet: 10, fetch: 9, eat: 10 };   // 幾格換一張動畫
 const cat = { x: 0, y: 0, vx: 0, vy: 0, dir: 1, state: 'sit', t: 0, dur: 60, frame: 0,
   energy: 80, target: 0, high: false, got: false, low: false, up: false,
   miss: 0, bored: 0 };                                 // miss：盯著搆不到的東西多久了；bored：放棄後還有多久懶得理它
@@ -171,7 +171,7 @@ let toy = 'ball';                                      // 'ball' 毛球、'laser
 const REACH = 44;                                      // 跳起來前掌最高搆得到離地多高
 const PATIENCE = 600;                                  // 盯著搆不到的東西超過幾格就可能放棄
 const ROLL = 12;                                       // 翻肚前先趴下、翻回來也先趴一下，各幾格
-let wishCD = 3600;                                     // 還有幾格才會再冒泡泡（討摸、想吃妙脆角）
+let wishCD = 1800;                                     // 還有幾格才會再冒泡泡（討摸、想吃妙脆角、大泡泡）
 
 function setState(s, dur = 60) {
   cat.state = s; cat.t = 0; cat.dur = dur; cat.frame = 0;
@@ -218,8 +218,9 @@ function nextIdle() {                                  // 閒著的時候要做�
   if (quiet) return setState('sleep', 600);
   if (cat.energy < 20) return setState('sleep', rand(600, 900));
   if (snack && snack.landed) return setState('fetch', 600);   // 地上還有妙脆角沒吃完
-  if (!wishCD) {                                       // 冒個泡泡：討摸，或是盯著妙脆角流口水
-    wishCD = rand(7200, 18000);                        // 下一次 2～5 分鐘後
+  if (!wishCD) {                                       // 冒個泡泡：擲到大泡泡就想著一張圖片，不然就討摸或盯著妙脆角流口水
+    wishCD = rand(3600, 9000);                         // 下一次 1～2.5 分鐘後
+    if (pic) { const p = pic; pic = null; return dream(p); }
     return setState(Math.random() < 0.5 ? 'beg' : 'drool', 600);
   }
   const r = Math.random();
@@ -257,7 +258,9 @@ function updateCat() {
   const reach = toy === 'ball' || canReach(p);         // 毛球都在地上，一定搆得到
   if (!reach && ['stare', 'hunt', 'loaf'].includes(cat.state)) cat.miss++;
   cat.bored = Math.max(0, cat.bored - 1);
+  const cd = wishCD;
   wishCD = Math.max(0, wishCD - 1);
+  if (cd > PREP && wishCD <= PREP) preparePic();       // 快冒泡泡了：先決定大泡泡還是小泡泡
 
   switch (cat.state) {
     case 'sit': case 'lick':
@@ -407,8 +410,8 @@ function updateCat() {
       if (!quiet && cat.t > cat.dur && cat.energy > 90) setState('sit', 120);
       break;
 
-    /* ── 泡泡：討摸、想吃妙脆角。點泡泡（或在貓身上來回摸）就有反應，沒理牠就算了 ── */
-    case 'beg': case 'drool':
+    /* ── 泡泡：討摸、想吃妙脆角、望著大泡泡裡的圖片發呆。點泡泡（或在貓身上來回摸）就有反應，沒理牠就算了 ── */
+    case 'beg': case 'drool': case 'dream':
       if (cat.t > cat.dur) setState('sit', rand(60, 120));
       break;
 
@@ -476,6 +479,10 @@ function sitPose(f, mode) {
     det.push([4, -18, 2, 1, 'E'], [4, -17, 2, 1, 'G'], [5, -14, 2, 1, 'O']);
     const L = f % 5;
     if (L) det.push([6, -13, 1, L, 'B']);
+  }
+  else if (mode === 'dream') {                         // 抬頭望著大泡泡，眼睛閃閃發亮，偶爾眨眼
+    if (f % 12 === 11) det.push([4, -17, 2, 1, 'E']);
+    else det.push([4, -18, 2, 1, 'E'], [4, -17, 2, 1, 'G'], [5, -18, 1, 1, 'W']);
   }
   else if (mode === 'stare') det.push([4, -18, 2, 1, 'G'], [4, -17, 2, 1, 'E']);
   else if (f % 12 === 11) det.push([4, -17, 1, 1, 'E']);    // 眨眼
@@ -634,6 +641,7 @@ function currentPose() {
     case 'slap': return sitPose(f, 'swipe');
     case 'stare': case 'beg': return sitPose(f, 'stare');
     case 'drool': return sitPose(f, 'drool');
+    case 'dream': return sitPose(f, 'dream');
     case 'pet': return sitPose(f, 'pet');
     case 'fetch': return standPose(f);
     case 'eat': return eatPose(f);
@@ -683,7 +691,7 @@ function drawStars(x, y) {                             // 仰望星空：望著�
 
 /* ═══ 泡泡、妙脆角、小特效 ═══ */
 let snack = null;                                      // 掉下來的妙脆角 { x, y, vy, landed, bites }
-const fx = [];                                         // 飄起來的愛心、餅乾屑
+const fx = [];                                         // 飄起來的愛心、餅乾屑、泡泡破掉的碎片
 function puff(kind, x, y) {
   fx.push(kind === 'heart' ? { kind, x, y, vx: rand(-0.1, 0.1), vy: -0.25, life: 70, t: 0 }
                            : { kind, x, y, vx: rand(-0.6, 0.6), vy: rand(-1.4, -0.6), life: 40, t: 0 });
@@ -707,7 +715,8 @@ function drawFx() {
     if (q.kind === 'heart') {
       ctx.fillStyle = '#ff7aa2';
       ctx.fillRect(x, y, 1, 1); ctx.fillRect(x + 2, y, 1, 1); ctx.fillRect(x, y + 1, 3, 1); ctx.fillRect(x + 1, y + 2, 1, 1);
-    } else { ctx.fillStyle = '#e9a23b'; ctx.fillRect(x, y, 1, 1); }
+    } else if (q.kind === 'spark') { ctx.fillStyle = q.c; ctx.fillRect(x, y, 1, 1); }
+    else { ctx.fillStyle = '#e9a23b'; ctx.fillRect(x, y, 1, 1); }
   }
   ctx.globalAlpha = 1;
 }
@@ -722,7 +731,8 @@ function drawSnack(x, y, bites = 0) {                  // (x, y)：左下角；�
   }
   if (!bites) { ctx.fillStyle = '#7a4512'; ctx.fillRect(x + n - 1, top(n - 1) + 1, 1, SNACK[n - 1] - 2); }   // 喇叭口裡面
 }
-function bubbleBox() {                                 // 頭頂上的泡泡，只有討摸、流口水的時候才有
+function bubbleBox() {                                 // 討摸、流口水是頭頂上的小泡泡，發呆是臉斜前方的大泡泡
+  if (cat.state === 'dream') return dreamPic && bigBox(cat.dir);
   if (cat.state !== 'beg' && cat.state !== 'drool') return null;
   const w = 15, h = 11;
   const x0 = clamp(Math.round(cat.x + cat.dir * 4) - 7, 1, W - w - 1);
@@ -731,7 +741,9 @@ function bubbleBox() {                                 // 頭頂上的泡泡，�
 }
 function drawBubble() {
   const b = bubbleBox();
+  showPic(b);
   if (!b) return;
+  if (cat.state === 'dream') return drawBigBubble(b);
   const w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1, hx = Math.round(cat.x + cat.dir * 4);
   ctx.fillStyle = C.O;                                 // 圓角框
   ctx.fillRect(b.x0 + 1, b.y0, w - 2, h); ctx.fillRect(b.x0, b.y0 + 1, w, h - 2);
@@ -748,6 +760,128 @@ function drawBubble() {
     ctx.fillStyle = C.O; ctx.fillRect(hx - 1, b.y1 + 2, 3, 3); ctx.fillRect(hx, b.y1 + 6, 2, 2);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(hx, b.y1 + 3, 1, 1);
     drawSnack(b.x0 + 3, b.y0 + 9);
+  }
+}
+
+/* ═══ 大泡泡：望著一張圖片發呆 ═══
+   圖片從「圖片」資料夾底下的 YarnCat 隨機挑（Rust 的 list_pictures、read_picture）；網頁版沒有資料夾，改成把圖片拖進視窗。
+   快冒泡泡前先擲骰子，擲到大泡泡才去讀圖片、縮好，冒泡泡時就不用等。
+   圖片用螢幕實際的解析度畫在另一個 canvas，照片才不會變成馬賽克。那個 canvas 墊在主畫布底下，
+   主畫布在泡泡裡挖個洞讓它透出來，所以雷射光、逗貓棒還是畫在圖片上面。 */
+const BIG = 1 / 3;                                     // 冒泡泡時有多少機率是大泡泡（沒放圖片就一定是小泡泡）
+const PREP = 300;                                      // 冒泡泡前幾格先準備圖片
+const PIC_W = 48, PIC_H = 28, PIC_MIN = 12;           // 圖片最寬、最高幾格；泡泡內框至少幾格，細長的圖片才不會擠成一條
+let pic = null;                                        // 準備好、等著冒出來的圖片 { el, w, h }
+let picSeq = 0;                                        // 又重新擲骰子的話，還沒讀完的那張就不要了
+let lastPic = '';                                      // 上一次挑到哪一張，下次盡量換一張
+let dreamPic = null;                                   // 大泡泡裡正在想的圖片
+const dropped = [];                                    // 網頁版拖進來的圖片
+
+function preparePic() {
+  pic = null;
+  const seq = ++picSeq;
+  if (Math.random() < BIG) loadPic().then(p => { if (seq === picSeq) pic = p; });
+}
+async function loadPic() {                             // 隨機挑一張圖片縮成泡泡的大小；沒有圖片、讀不了就是 null
+  try {
+    const blob = await pickPic();
+    if (!blob) return null;
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return fitPic(img);
+    } finally { URL.revokeObjectURL(url); }
+  } catch (_) { return null; }
+}
+async function pickPic() {
+  if (!TAURI) return pickNew(dropped, f => f.name);
+  const name = pickNew(await TAURI.core.invoke('list_pictures'), n => n);
+  if (!name) return null;
+  return new Blob([new Uint8Array(await TAURI.core.invoke('read_picture', { name }))]);
+}
+function pickNew(list, nameOf) {                       // 隨機挑一個，盡量不要跟上一次同一張
+  let pool = list.filter(x => nameOf(x) !== lastPic);
+  if (!pool.length) pool = list;
+  const x = pool[Math.floor(Math.random() * pool.length)];
+  if (x) lastPic = nameOf(x);
+  return x;
+}
+function fitPic(img) {                                 // 縮成泡泡的大小，畫在一張螢幕解析度的 canvas 上
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  if (!nw || !nh) return null;
+  let f = Math.min(PIC_W / nw, PIC_H / nh);
+  if (f >= 1) f = Math.floor(f);                       // 小圖（像素畫）放大整數倍，跟貓一樣一格一格的
+  const w = Math.max(1, Math.round(nw * f)), h = Math.max(1, Math.round(nh * f));
+  const k = Math.round(S * (window.devicePixelRatio || 1));   // 一格佔幾個實體像素
+  const el = document.createElement('canvas');
+  el.width = w * k; el.height = h * k;
+  const c = el.getContext('2d');
+  if (f >= 1) { c.imageSmoothingEnabled = false; c.drawImage(img, 0, 0, el.width, el.height); }
+  else shrink(c, img, el.width, el.height);
+  return { el, w, h };
+}
+function shrink(c, img, tw, th) {                      // 照片縮很多倍：先一次縮一半，最後再縮到剛好，才不會有鋸齒
+  let src = img, w = img.naturalWidth, h = img.naturalHeight;
+  while (w > tw * 2 && h > th * 2) {
+    w = Math.ceil(w / 2); h = Math.ceil(h / 2);
+    const t = document.createElement('canvas');
+    t.width = w; t.height = h;
+    t.getContext('2d').drawImage(src, 0, 0, w, h);
+    src = t;
+  }
+  c.imageSmoothingQuality = 'high';
+  c.drawImage(src, 0, 0, tw, th);
+}
+
+function dream(p) {                                    // 冒大泡泡
+  dreamPic = p;
+  const b = bigBox(cat.dir);
+  if (b.x0 < 1 || b.x1 > W - 2) cat.dir = -cat.dir;   // 臉前面放不下就轉身
+  setState('dream', 600);
+}
+function dreamNow() {                                  // 網頁版：拖進圖片、按 6，馬上冒大泡泡
+  loadPic().then(p => { if (p && cat.state !== 'held' && cat.y >= FLOOR) dream(p); });
+}
+function bigBox(dir) {                                 // 大泡泡在臉的斜前方，底邊大約在眼睛的高度；太高的話從畫面頂端往下長
+  const iw = Math.max(dreamPic.w, PIC_MIN), ih = Math.max(dreamPic.h, PIC_MIN);
+  const w = iw + 6, h = ih + 6, ox = Math.round(cat.x), bob = cat.t % 60 < 30 ? 0 : 1;
+  const x0 = dir > 0 ? ox + 14 : ox - 14 - w;
+  const y0 = Math.max(1, Math.round(cat.y) - 13 - h) - bob;
+  return { x0, y0, x1: x0 + w - 1, y1: y0 + h - 1, bob,   // ix、iy、iw、ih：圖片的位置，在內框裡置中
+    ix: x0 + 3 + ((iw - dreamPic.w) >> 1), iy: y0 + 3 + ((ih - dreamPic.h) >> 1), iw: dreamPic.w, ih: dreamPic.h };
+}
+function drawBigBubble(b) {
+  const w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1;
+  ctx.fillStyle = C.O;                                 // 圓角框，泡泡大，角也圓一點
+  ctx.fillRect(b.x0 + 2, b.y0, w - 4, h); ctx.fillRect(b.x0 + 1, b.y0 + 1, w - 2, h - 2); ctx.fillRect(b.x0, b.y0 + 2, w, h - 4);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(b.x0 + 2, b.y0 + 1, w - 4, h - 2); ctx.fillRect(b.x0 + 1, b.y0 + 2, w - 2, h - 4);
+  const ox = Math.round(cat.x), oy = Math.round(cat.y) - b.bob;   // 想像泡泡的尾巴：頭頂斜前方一小一大兩顆圓點
+  const X = (x, ww) => cat.dir > 0 ? ox + x : ox - x - ww;
+  ctx.fillStyle = C.O; ctx.fillRect(X(8, 2), oy - 25, 2, 2); ctx.fillRect(X(10, 3), oy - 29, 3, 3);
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(X(11, 1), oy - 28, 1, 1);
+  ctx.clearRect(b.ix, b.iy, b.iw, b.ih);               // 挖個洞，讓底下那張圖片透出來
+}
+let shown = null, shownAt = '';                        // 已經放進網頁的圖片 canvas、它擺在哪
+function showPic(b) {                                  // 圖片 canvas 墊在主畫布底下，對準大泡泡挖的洞
+  const el = b && cat.state === 'dream' ? dreamPic.el : null;
+  if (el !== shown) {
+    if (shown) shown.remove();
+    if (el) cv.before(el);
+    shown = el; shownAt = '';
+  }
+  if (!el) { dreamPic = null; return; }
+  const at = `left:${b.ix * S}px;bottom:${(H - b.iy - b.ih) * S}px;width:${b.iw * S}px;height:${b.ih * S}px`;
+  if (at !== shownAt) { shownAt = at; el.style.cssText = at; }
+}
+function burst(b) {                                    // 大泡泡被點破：白色、黑色的碎片往外噴
+  const cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2, rx = (b.x1 - b.x0) / 2, ry = (b.y1 - b.y0) / 2;
+  for (let i = 0; i < 20; i++) {
+    const a = (i + rand(0, 0.5)) / 20 * 2 * Math.PI, s = rand(0.4, 0.8);
+    fx.push({ kind: 'spark', c: i % 2 ? C.O : '#ffffff', x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 20, t: 0 });
   }
 }
 
@@ -809,7 +943,7 @@ function catBox() {
     case 'sleep': return { x0: x - 12, y0: y - 14, x1: x + 12, y1: y + 1 };
     case 'held': case 'fall': return { x0: x - 7, y0: y - 30, x1: x + 8, y1: y + 1 };
     case 'sit': case 'stare': case 'lick': case 'swipe': case 'slap':
-    case 'beg': case 'drool': case 'pet': return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+    case 'beg': case 'drool': case 'dream': case 'pet': return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
     case 'leap': case 'clutch': {
       const upright = cat.state === 'leap' ? cat.high : !cat.low;
       if (upright) return { x0: x - 11, y0: y - 30, x1: x + 11, y1: y + 1 };
@@ -869,12 +1003,20 @@ if (TAURI) {
   TAURI.event.listen('toy', ({ payload }) => setToy(payload));
 } else {
   document.body.classList.add('browser');
-  // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒；4 討摸泡泡、5 想吃妙脆角
+  // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒；4 討摸泡泡、5 想吃妙脆角、6 大泡泡（要先拖圖片進來）
   window.addEventListener('keydown', e => {
     const t = { 1: 'ball', 2: 'laser', 3: 'wand' }[e.key];
     if (t) setToy(t);
     if ((e.key === '4' || e.key === '5') && cat.state !== 'held' && cat.y >= FLOOR)
       setState(e.key === '4' ? 'beg' : 'drool', 600);
+    if (e.key === '6') dreamNow();
+  });
+  // 網頁版沒有圖片資料夾：把圖片拖進視窗，大泡泡就從這些圖片裡挑（重新整理就要再拖一次）
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => {
+    e.preventDefault();
+    dropped.push(...[...e.dataTransfer.files].filter(f => f.type.startsWith('image/')));
+    dreamNow();
   });
 }
 function setCursor(hit) {
@@ -883,7 +1025,7 @@ function setCursor(hit) {
 }
 
 /* ═══ 摸貓：游標在貓身上左右來回滑（不用按），來回 3 次就算在摸 ═══ */
-const PETTABLE = ['sit', 'lick', 'stare', 'walk', 'beg', 'drool', 'sleep', 'loaf', 'flop', 'pet'];
+const PETTABLE = ['sit', 'lick', 'stare', 'walk', 'beg', 'drool', 'dream', 'sleep', 'loaf', 'flop', 'pet'];
 const rub = { x: null, dir: 0, flips: 0, last: 0 };
 function stroke(p) {
   if (!inBox(p, catBox()) || !PETTABLE.includes(cat.state)) { rub.x = null; rub.dir = rub.flips = 0; return; }
@@ -906,7 +1048,9 @@ function pet() {
 }
 function popBubble() {                                 // 點了泡泡
   if (cat.state === 'beg') return pet();
-  const b = bubbleBox();                               // 想吃妙脆角：從泡泡掉一根下來
+  const b = bubbleBox();
+  if (cat.state === 'dream') { burst(b); return setState('sit', rand(60, 120)); }   // 大泡泡：啵，破掉了
+  // 想吃妙脆角：從泡泡掉一根下來
   if (!snack) snack = { x: clamp((b.x0 + b.x1) / 2, 6, W - 6), y: b.y1, vy: 0, landed: false, bites: 0 };
   setState('fetch', 600);
 }

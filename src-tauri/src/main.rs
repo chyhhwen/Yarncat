@@ -2,6 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
@@ -12,10 +15,11 @@ use std::{
 
 use serde::Serialize;
 use tauri::{
+    ipc::Response,
     menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, Submenu},
     tray::TrayIconBuilder,
     window::Monitor,
-    Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow,
 };
 
 /// 長條視窗的高度（邏輯像素，會依螢幕縮放比例換算）
@@ -41,6 +45,79 @@ const PLACE_RETRIES: u8 = 3;
 #[tauri::command]
 fn set_passthrough(window: WebviewWindow, on: bool) -> Result<(), String> {
     window.set_ignore_cursor_events(on).map_err(|e| e.to_string())
+}
+
+/// 大泡泡的圖片放在「圖片」資料夾底下的這個資料夾（Windows：圖片\YarnCat，macOS：~/Pictures/YarnCat）
+const PICTURE_FOLDER: &str = "YarnCat";
+
+/// 大泡泡用得了的圖片（副檔名，小寫）：Windows、macOS 的 WebView 都看得懂的格式
+const PICTURE_EXTS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+
+/// 檔案太大的圖片不讀：解開來太吃記憶體
+const PICTURE_MAX_BYTES: u64 = 20 * 1024 * 1024;
+
+fn picture_dir(app: &AppHandle) -> Option<PathBuf> {
+    app.path().picture_dir().ok().map(|d| d.join(PICTURE_FOLDER))
+}
+
+/// 大泡泡用得了嗎：副檔名對、是檔案、不會太大
+fn is_picture(path: &Path) -> bool {
+    let ext_ok = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| PICTURE_EXTS.contains(&e.to_ascii_lowercase().as_str()));
+    ext_ok && std::fs::metadata(path).is_ok_and(|m| m.is_file() && m.len() <= PICTURE_MAX_BYTES)
+}
+
+/// 圖片資料夾裡有哪些圖片，只回傳檔名；資料夾還沒建立就是一張都沒有
+#[tauri::command]
+async fn list_pictures(app: AppHandle) -> Vec<String> {
+    let Some(dir) = picture_dir(&app) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(|e| e.ok())
+        .filter(|e| is_picture(&e.path()))
+        .filter_map(|e| e.file_name().into_string().ok())
+        .filter(|name| !name.starts_with('.')) // macOS 在某些磁碟上會多出 ._ 開頭的隱藏檔
+        .collect()
+}
+
+/// 讀一張圖片給前端畫。只收 list_pictures 給的檔名，帶路徑的（..、斜線）一律不讀
+#[tauri::command]
+async fn read_picture(app: AppHandle, name: String) -> Result<Response, String> {
+    let dir = picture_dir(&app).ok_or("找不到圖片資料夾")?;
+    if Path::new(&name).file_name() != Some(OsStr::new(&name)) {
+        return Err(format!("不是檔名：{name}"));
+    }
+    let path = dir.join(&name);
+    if !is_picture(&path) {
+        return Err(format!("不是用得了的圖片：{name}"));
+    }
+    std::fs::read(&path).map(Response::new).map_err(|e| e.to_string())
+}
+
+/// 系統匣「打開泡泡圖片資料夾」：還沒有就先建立，再用檔案總管（macOS 是 Finder）打開
+fn open_picture_dir(app: &AppHandle) {
+    let Some(dir) = picture_dir(app) else {
+        return;
+    };
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    let opener = "explorer";
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let opener = "xdg-open";
+    // 等它結束才不會留下殭屍行程；放到別的執行緒等，選單才不會卡住
+    thread::spawn(move || {
+        let _ = Command::new(opener).arg(dir).status();
+    });
 }
 
 /// 長條該擺在哪、多大（實體像素）：(x, y, 寬, 高)
@@ -263,7 +340,7 @@ mod appkit {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![set_passthrough])
+        .invoke_handler(tauri::generate_handler![set_passthrough, list_pictures, read_picture])
         .setup(|app| {
             // macOS：不在 Dock 出現，只留選單列的貓咪圖示
             #[cfg(target_os = "macos")]
@@ -279,7 +356,7 @@ fn main() {
             win.show()?;
             watch_cursor(win.clone());
 
-            // 系統匣：換玩具、換螢幕、安靜模式（開會、分享螢幕時讓貓去睡）、結束
+            // 系統匣：換玩具、換螢幕、打開泡泡圖片資料夾、安靜模式（開會、分享螢幕時讓貓去睡）、結束
             let toy_ball = CheckMenuItem::with_id(app, "toy:ball", "毛球", true, true, None::<&str>)?;
             let toy_laser = CheckMenuItem::with_id(app, "toy:laser", "雷射光", true, false, None::<&str>)?;
             let toy_wand = CheckMenuItem::with_id(app, "toy:wand", "逗貓棒", true, false, None::<&str>)?;
@@ -307,9 +384,10 @@ fn main() {
             let screen_refs: Vec<&dyn IsMenuItem<tauri::Wry>> =
                 screen_items.iter().map(|it| it as &dyn IsMenuItem<tauri::Wry>).collect();
             let screens = Submenu::with_items(app, "螢幕", true, &screen_refs)?;
+            let pictures = MenuItem::with_id(app, "pictures", "打開泡泡圖片資料夾", true, None::<&str>)?;
             let quiet = CheckMenuItem::with_id(app, "quiet", "安靜模式", true, false, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "結束毛球貓", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toys, &screens, &quiet, &quit])?;
+            let menu = Menu::with_items(app, &[&toys, &screens, &pictures, &quiet, &quit])?;
             let quiet_item = quiet.clone();
             let toy_items = [toy_ball, toy_laser, toy_wand];
             TrayIconBuilder::with_id("tray")
@@ -321,6 +399,7 @@ fn main() {
                         let on = quiet_item.is_checked().unwrap_or(false);
                         let _ = app.emit("quiet", on);
                     }
+                    "pictures" => open_picture_dir(app),
                     "quit" => app.exit(0),
                     // 玩具只能選一個：點到的打勾，其他取消
                     id if id.starts_with("toy:") => {
