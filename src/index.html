@@ -9,7 +9,7 @@
   html, body { margin:0; height:100%; overflow:hidden; background:transparent; }
   body { user-select:none; -webkit-user-select:none; }
   canvas { position:absolute; left:0; bottom:0; image-rendering:pixelated; }
-  body.grab { cursor:grab; } body.grabbing { cursor:grabbing; }
+  body.grab { cursor:grab; } body.grabbing { cursor:grabbing; } body.poke { cursor:pointer; }
   /* 直接用瀏覽器開這個檔案（不在桌寵視窗裡）時，給個底色方便除錯 */
   body.browser { background:#4b5b72; }
 </style>
@@ -38,6 +38,7 @@ let W = 0, H = 0, FLOOR = 0;
 const C = {           // 貓與毛球的顏色（原創的藍灰虎斑白襪貓）
   O: '#262530', F: '#808a9c', D: '#5c6577', W: '#f1eee8', P: '#e79aa5', G: '#9fcf6e', E: '#262530',
   Y: '#d4574e', Yl: '#ee8a7f', Yd: '#a93f37',
+  B: '#a8dcff',                                       // 口水
 };
 
 function resize() {
@@ -59,6 +60,11 @@ function resize() {
   cat.x = clamp(cat.x, 12, W - 12);
   if (cat.state !== 'held') cat.y = cat.y >= oldFloor ? FLOOR : Math.min(cat.y, FLOOR);   // 原本站在地上就繼續站在地上
   ball.x = clamp(ball.x, ball.r, W - ball.r);
+  if (snack) {
+    if (S !== oldS) snack.x *= oldS / S;
+    snack.x = clamp(snack.x, 6, W - 6);
+    if (snack.landed) snack.y = FLOOR;
+  }
 }
 let started = false;
 function watchDpr() {                                  // 改縮放、換到不同縮放的螢幕時重算倍率
@@ -155,7 +161,8 @@ const ZH = { sit: '坐著', lick: '舔毛', stare: '盯著毛球', walk: '散步
   crouch: '壓低準備撲', pounce: '飛撲', swipe: '用前掌撥', sleep: '睡覺', held: '被拎起來', fall: '掉下來' };
 const RATE = { sit: 20, lick: 9, stare: 30, walk: 9, chase: 5, crouch: 6, pounce: 99,
   swipe: 14, sleep: 40, held: 10, fall: 10,
-  hunt: 5, aim: 6, leap: 99, clutch: 12, slap: 14, loaf: 12, flop: 18 };   // 幾格換一張動畫
+  hunt: 5, aim: 6, leap: 99, clutch: 12, slap: 14, loaf: 12, flop: 18,
+  beg: 20, drool: 15, pet: 10, fetch: 9, eat: 10 };   // 幾格換一張動畫
 const cat = { x: 0, y: 0, vx: 0, vy: 0, dir: 1, state: 'sit', t: 0, dur: 60, frame: 0,
   energy: 80, target: 0, high: false, got: false, low: false, up: false,
   miss: 0, bored: 0 };                                 // miss：盯著搆不到的東西多久了；bored：放棄後還有多久懶得理它
@@ -164,6 +171,7 @@ let toy = 'ball';                                      // 'ball' 毛球、'laser
 const REACH = 44;                                      // 跳起來前掌最高搆得到離地多高
 const PATIENCE = 600;                                  // 盯著搆不到的東西超過幾格就可能放棄
 const ROLL = 12;                                       // 翻肚前先趴下、翻回來也先趴一下，各幾格
+let wishCD = 3600;                                     // 還有幾格才會再冒泡泡（討摸、想吃妙脆角）
 
 function setState(s, dur = 60) {
   cat.state = s; cat.t = 0; cat.dur = dur; cat.frame = 0;
@@ -202,13 +210,18 @@ function kick(power, up) {
   cat.energy -= 5;
 }
 function excite() {
-  if (quiet || ['sleep', 'held', 'fall', 'pounce'].includes(cat.state)) return;
+  if (quiet || ['sleep', 'held', 'fall', 'pounce', 'pet', 'eat'].includes(cat.state)) return;
   setState('stare', rand(15, 35));
 }
 
 function nextIdle() {                                  // 閒著的時候要做什麼？擲骰子
   if (quiet) return setState('sleep', 600);
   if (cat.energy < 20) return setState('sleep', rand(600, 900));
+  if (snack && snack.landed) return setState('fetch', 600);   // 地上還有妙脆角沒吃完
+  if (!wishCD) {                                       // 冒個泡泡：討摸，或是盯著妙脆角流口水
+    wishCD = rand(7200, 18000);                        // 下一次 2～5 分鐘後
+    return setState(Math.random() < 0.5 ? 'beg' : 'drool', 600);
+  }
   const r = Math.random();
   if (r < (toy === 'ball' ? 0.45 : 0.7) && cat.energy > 30) return setState('stare', rand(40, 90));
   if (r < 0.65) return setState('lick', rand(90, 150));
@@ -244,6 +257,7 @@ function updateCat() {
   const reach = toy === 'ball' || canReach(p);         // 毛球都在地上，一定搆得到
   if (!reach && ['stare', 'hunt', 'loaf'].includes(cat.state)) cat.miss++;
   cat.bored = Math.max(0, cat.bored - 1);
+  wishCD = Math.max(0, wishCD - 1);
 
   switch (cat.state) {
     case 'sit': case 'lick':
@@ -393,6 +407,37 @@ function updateCat() {
       if (!quiet && cat.t > cat.dur && cat.energy > 90) setState('sit', 120);
       break;
 
+    /* ── 泡泡：討摸、想吃妙脆角。點泡泡（或在貓身上來回摸）就有反應，沒理牠就算了 ── */
+    case 'beg': case 'drool':
+      if (cat.t > cat.dur) setState('sit', rand(60, 120));
+      break;
+
+    case 'pet':                                        // 被摸：瞇眼呼嚕，冒愛心
+      cat.energy = Math.min(100, cat.energy + 0.02);
+      if (cat.t % 30 === 1) puff('heart', cat.x + cat.dir * rand(0, 6), cat.y - 22);
+      if (cat.t > cat.dur) quiet ? setState('sleep', 600) : setState('sit', rand(90, 150));
+      break;
+
+    case 'fetch': {                                    // 走去妙脆角旁邊
+      if (!snack) { setState('sit', 60); break; }
+      cat.dir = Math.sign(snack.x - cat.x) || cat.dir;
+      const tx = clamp(snack.x - cat.dir * 15, 12, W - 12);
+      if (Math.abs(tx - cat.x) > 1) cat.x += Math.sign(tx - cat.x) * Math.min(0.8, Math.abs(tx - cat.x));
+      else if (snack.landed) { cat.dir = Math.sign(snack.x - cat.x) || cat.dir; setState('eat', 200); }
+      if (cat.t > cat.dur) setState('sit', 60);
+      break;
+    }
+
+    case 'eat':                                        // 喀滋喀滋，一口一口咬
+      if (!snack) { setState('lick', rand(120, 180)); break; }
+      if (cat.t % 60 === 30) {
+        snack.bites++;
+        for (let i = 0; i < 4; i++) puff('crumb', snack.x + rand(-2, 2), FLOOR - 3);
+        if (snack.bites >= 3) { snack = null; cat.energy = Math.min(100, cat.energy + 20); }
+      }
+      if (cat.t > cat.dur) setState('lick', rand(120, 180));   // 吃完舔舔嘴
+      break;
+
     case 'held':
       break;                                           // 位置由滑鼠決定
 
@@ -422,13 +467,19 @@ function sitPose(f, mode) {
     parts.push([1, -4, 2, 4, 'F']);
     parts.push(f % 2 === 0 ? [5, -10, 3, 2, 'F'] : [6, -6, 4, 2, 'F']);
     det.push([1, -1, 2, 1, 'W'], [4, -18, 1, 2, 'E']);
-  } else {
-    parts.push([1, -4, 2, 4, 'F'], [3, -4, 2, 4, 'F']);
-    det.push([1, -1, 4, 1, 'W']);
-    if (mode === 'stare') det.push([4, -18, 2, 1, 'G'], [4, -17, 2, 1, 'E']);
-    else if (f % 12 === 11) det.push([4, -17, 1, 1, 'E']);    // 眨眼
-    else det.push([4, -18, 1, 1, 'G'], [4, -17, 1, 1, 'E']);
+    return [parts, det];
   }
+  parts.push([1, -4, 2, 4, 'F'], [3, -4, 2, 4, 'F']);
+  det.push([1, -1, 4, 1, 'W']);
+  if (mode === 'pet') det.push([3, -17, 1, 1, 'E'], [4, -18, 1, 1, 'E'], [5, -17, 1, 1, 'E']);   // ^ 瞇眼
+  else if (mode === 'drool') {                         // 抬頭望著泡泡裡的妙脆角，口水滴下來
+    det.push([4, -18, 2, 1, 'E'], [4, -17, 2, 1, 'G'], [5, -14, 2, 1, 'O']);
+    const L = f % 5;
+    if (L) det.push([6, -13, 1, L, 'B']);
+  }
+  else if (mode === 'stare') det.push([4, -18, 2, 1, 'G'], [4, -17, 2, 1, 'E']);
+  else if (f % 12 === 11) det.push([4, -17, 1, 1, 'E']);    // 眨眼
+  else det.push([4, -18, 1, 1, 'G'], [4, -17, 1, 1, 'E']);
   return [parts, det];
 }
 function lickPose(f) {
@@ -558,6 +609,18 @@ function leapPose(mode) {                              // 用後腳撐起、身�
   else det.push([2, -21, 2, 1, 'G'], [2, -20, 2, 1, 'E']);
   return [parts, det];
 }
+function eatPose(f) {                                  // 低頭咬妙脆角，頭一點一點的
+  const b = f % 2;
+  const parts = [
+    [-16, -6, 6, 2, 'F'],
+    [-8, -2, 2, 2, 'F'], [-5, -2, 2, 2, 'F'], [2, -2, 2, 2, 'F'], [5, -2, 2, 2, 'F'],
+    [-10, -7, 16, 5, 'F'],
+    [5, -10 + b, 8, 6, 'F'], [5, -12 + b, 2, 2, 'F'], [10, -12 + b, 2, 2, 'F'],
+  ];
+  const det = [[-6, -7, 1, 3, 'D'], [-3, -7, 1, 3, 'D'], [-7, -3, 11, 1, 'W'],
+    [9, -7 + b, 4, 3, 'W'], [10, -8 + b, 2, 1, 'E'], [12, -7 + b, 1, 1, 'P']];
+  return [parts, det];
+}
 const onBack = () => cat.state === 'flop' && cat.t >= ROLL && cat.t <= cat.dur - ROLL;   // 翻好肚了（不是正在躺下或翻回來）
 function currentPose() {
   const f = cat.frame;
@@ -569,7 +632,11 @@ function currentPose() {
     case 'leap': return cat.high ? leapPose('reach') : pouncePose();
     case 'clutch': return cat.low ? crouchPose(0) : leapPose('hold');
     case 'slap': return sitPose(f, 'swipe');
-    case 'stare': return sitPose(f, 'stare');
+    case 'stare': case 'beg': return sitPose(f, 'stare');
+    case 'drool': return sitPose(f, 'drool');
+    case 'pet': return sitPose(f, 'pet');
+    case 'fetch': return standPose(f);
+    case 'eat': return eatPose(f);
     case 'swipe': return sitPose(f, 'swipe');
     case 'lick': return lickPose(f);
     case 'walk': case 'chase': return standPose(f);
@@ -584,7 +651,7 @@ function currentPose() {
 function drawCat() {
   const [parts, det] = currentPose();
   const ox = Math.round(cat.x);
-  const oy = Math.round(cat.y) - ((cat.state === 'chase' || cat.state === 'hunt') && cat.frame % 2 ? 1 : 0);
+  const oy = Math.round(cat.y) - (['chase', 'hunt', 'fetch'].includes(cat.state) && cat.frame % 2 ? 1 : 0);
   const X = (x, w) => cat.dir > 0 ? ox + x : ox - x - w;
   ctx.fillStyle = C.O;
   for (const [x, y, w, h] of parts) ctx.fillRect(X(x - 1, w + 2), oy + y - 1, w + 2, h + 2);
@@ -612,6 +679,76 @@ function drawStars(x, y) {                             // 仰望星空：望著�
     if (k > 0.15 && k < 0.35) { ctx.fillRect(sx - 1, sy, 3, 1); ctx.fillRect(sx, sy - 1, 1, 3); }   // 最亮的時候是十字
   }
   ctx.globalAlpha = 1;
+}
+
+/* ═══ 泡泡、妙脆角、小特效 ═══ */
+let snack = null;                                      // 掉下來的妙脆角 { x, y, vy, landed, bites }
+const fx = [];                                         // 飄起來的愛心、餅乾屑
+function puff(kind, x, y) {
+  fx.push(kind === 'heart' ? { kind, x, y, vx: rand(-0.1, 0.1), vy: -0.25, life: 70, t: 0 }
+                           : { kind, x, y, vx: rand(-0.6, 0.6), vy: rand(-1.4, -0.6), life: 40, t: 0 });
+}
+function updateFx() {
+  if (snack && !snack.landed) {
+    snack.vy += G; snack.y += snack.vy;
+    if (snack.y >= FLOOR) { snack.y = FLOOR; snack.landed = true; }
+  }
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const q = fx[i];
+    q.t++; q.x += q.vx; q.y += q.vy;
+    if (q.kind === 'crumb') { q.vy += G; if (q.y > FLOOR) { q.y = FLOOR; q.vx = q.vy = 0; } }
+    if (q.t > q.life) fx.splice(i, 1);
+  }
+}
+function drawFx() {
+  for (const q of fx) {
+    ctx.globalAlpha = 1 - q.t / q.life;
+    const x = Math.round(q.x), y = Math.round(q.y);
+    if (q.kind === 'heart') {
+      ctx.fillStyle = '#ff7aa2';
+      ctx.fillRect(x, y, 1, 1); ctx.fillRect(x + 2, y, 1, 1); ctx.fillRect(x, y + 1, 3, 1); ctx.fillRect(x + 1, y + 2, 1, 1);
+    } else { ctx.fillStyle = '#e9a23b'; ctx.fillRect(x, y, 1, 1); }
+  }
+  ctx.globalAlpha = 1;
+}
+const SNACK = [1, 1, 2, 3, 3, 4, 5, 5];               // 妙脆角橫躺：每一欄多高（上下置中），左邊是尖端、右邊是喇叭口
+function drawSnack(x, y, bites = 0) {                  // (x, y)：左下角；每咬一口少兩欄
+  const n = SNACK.length - bites * 2, top = i => y - 3 - (SNACK[i] >> 1);
+  ctx.fillStyle = C.O;
+  for (let i = 0; i < n; i++) ctx.fillRect(x + i - 1, top(i) - 1, 3, SNACK[i] + 2);
+  for (let i = 0; i < n; i++) {
+    ctx.fillStyle = i % 2 ? '#c97f22' : '#f0b04a';     // 一圈一圈的紋路
+    ctx.fillRect(x + i, top(i), 1, SNACK[i]);
+  }
+  if (!bites) { ctx.fillStyle = '#7a4512'; ctx.fillRect(x + n - 1, top(n - 1) + 1, 1, SNACK[n - 1] - 2); }   // 喇叭口裡面
+}
+function bubbleBox() {                                 // 頭頂上的泡泡，只有討摸、流口水的時候才有
+  if (cat.state !== 'beg' && cat.state !== 'drool') return null;
+  const w = 15, h = 11;
+  const x0 = clamp(Math.round(cat.x + cat.dir * 4) - 7, 1, W - w - 1);
+  const y0 = Math.round(cat.y) - 42 - (cat.t % 60 < 30 ? 0 : 1);   // 輕輕上下浮
+  return { x0, y0, x1: x0 + w - 1, y1: y0 + h - 1 };
+}
+function drawBubble() {
+  const b = bubbleBox();
+  if (!b) return;
+  const w = b.x1 - b.x0 + 1, h = b.y1 - b.y0 + 1, hx = Math.round(cat.x + cat.dir * 4);
+  ctx.fillStyle = C.O;                                 // 圓角框
+  ctx.fillRect(b.x0 + 1, b.y0, w - 2, h); ctx.fillRect(b.x0, b.y0 + 1, w, h - 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(b.x0 + 1, b.y0 + 1, w - 2, h - 2);
+  if (cat.state === 'beg') {                           // 說話泡泡：尾巴是一個小三角
+    ctx.fillStyle = C.O; ctx.fillRect(hx - 1, b.y1, 3, 2); ctx.fillRect(hx, b.y1 + 2, 1, 1);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(hx, b.y1, 1, 1);
+    ctx.fillStyle = '#ff7aa2';                         // 愛心：想被摸
+    const cx = b.x0 + 5, cy = b.y0 + 2;
+    for (const [x, y, ww] of [[0, 0, 2], [3, 0, 2], [-1, 1, 7], [-1, 2, 7], [0, 3, 5], [1, 4, 3], [2, 5, 1]])
+      ctx.fillRect(cx + x, cy + y, ww, 1);
+  } else {                                             // 想像泡泡：尾巴是兩顆小圓點
+    ctx.fillStyle = C.O; ctx.fillRect(hx - 1, b.y1 + 2, 3, 3); ctx.fillRect(hx, b.y1 + 6, 2, 2);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(hx, b.y1 + 3, 1, 1);
+    drawSnack(b.x0 + 3, b.y0 + 9);
+  }
 }
 
 function drawBall() {
@@ -671,7 +808,8 @@ function catBox() {
   switch (cat.state) {
     case 'sleep': return { x0: x - 12, y0: y - 14, x1: x + 12, y1: y + 1 };
     case 'held': case 'fall': return { x0: x - 7, y0: y - 30, x1: x + 8, y1: y + 1 };
-    case 'sit': case 'stare': case 'lick': case 'swipe': case 'slap': return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
+    case 'sit': case 'stare': case 'lick': case 'swipe': case 'slap':
+    case 'beg': case 'drool': case 'pet': return { x0: x - 14, y0: y - 23, x1: x + 11, y1: y + 1 };
     case 'leap': case 'clutch': {
       const upright = cat.state === 'leap' ? cat.high : !cat.low;
       if (upright) return { x0: x - 11, y0: y - 30, x1: x + 11, y1: y + 1 };
@@ -690,6 +828,8 @@ function toWorld(e) {
   return { x: (e.clientX - r.left) / S, y: (e.clientY - r.top) / S };
 }
 function hitTest(p) {
+  const b = bubbleBox();
+  if (b && inBox(p, b)) return 'bubble';
   if (inBox(p, catBox())) return 'cat';
   if (toy === 'ball' && inBox(p, ballBox())) return 'ball';   // 雷射光、逗貓棒不擋滑鼠
   return null;
@@ -720,19 +860,55 @@ if (TAURI) {
     mouse.x = p.x; mouse.y = p.y;                      // 逗貓棒跟著游標，穿透時也收得到
     if (wandStale) { wandStale = false; if (toy === 'wand') initWand(); }
     if (drag) return;                                  // 拖曳中不切換，否則會中途鬆手
+    stroke(p);
     const hit = hitTest(p);
     setPassthrough(!hit);
-    document.body.classList.toggle('grab', !!hit);
+    setCursor(hit);
   });
   TAURI.event.listen('quiet', ({ payload }) => setQuiet(!!payload));
   TAURI.event.listen('toy', ({ payload }) => setToy(payload));
 } else {
   document.body.classList.add('browser');
-  // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒
+  // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒；4 討摸泡泡、5 想吃妙脆角
   window.addEventListener('keydown', e => {
     const t = { 1: 'ball', 2: 'laser', 3: 'wand' }[e.key];
     if (t) setToy(t);
+    if ((e.key === '4' || e.key === '5') && cat.state !== 'held' && cat.y >= FLOOR)
+      setState(e.key === '4' ? 'beg' : 'drool', 600);
   });
+}
+function setCursor(hit) {
+  document.body.classList.toggle('grab', hit === 'cat' || hit === 'ball');
+  document.body.classList.toggle('poke', hit === 'bubble');
+}
+
+/* ═══ 摸貓：游標在貓身上左右來回滑（不用按），來回 3 次就算在摸 ═══ */
+const PETTABLE = ['sit', 'lick', 'stare', 'walk', 'beg', 'drool', 'sleep', 'loaf', 'flop', 'pet'];
+const rub = { x: null, dir: 0, flips: 0, last: 0 };
+function stroke(p) {
+  if (!inBox(p, catBox()) || !PETTABLE.includes(cat.state)) { rub.x = null; rub.dir = rub.flips = 0; return; }
+  const now = performance.now();
+  if (rub.x !== null && Math.abs(p.x - rub.x) >= 1) {
+    const s = Math.sign(p.x - rub.x);
+    if (rub.dir && s !== rub.dir) {                    // 換方向了，算一次來回
+      rub.flips = now - rub.last < 700 ? rub.flips + 1 : 1;
+      rub.last = now;
+      if (cat.state === 'pet') cat.dur = Math.max(cat.dur, cat.t + 90);   // 繼續摸就繼續呼嚕
+      else if (rub.flips >= 3) pet();
+    }
+    rub.dir = s;
+  }
+  rub.x = p.x;
+}
+function pet() {
+  if (cat.state !== 'pet') setState('pet', 180);
+  rub.flips = 0;
+}
+function popBubble() {                                 // 點了泡泡
+  if (cat.state === 'beg') return pet();
+  const b = bubbleBox();                               // 想吃妙脆角：從泡泡掉一根下來
+  if (!snack) snack = { x: clamp((b.x0 + b.x1) / 2, 6, W - 6), y: b.y1, vy: 0, landed: false, bites: 0 };
+  setState('fetch', 600);
 }
 
 /* 毛球模式時 Rust 只在游標進到長條才回報位置，所以剛換成逗貓棒時 mouse 可能還是舊的。
@@ -746,6 +922,7 @@ window.addEventListener('pointerdown', e => {
   const kind = hitTest(toWorld(e));
   if (!kind) return;
   e.preventDefault();
+  if (kind === 'bubble') { popBubble(); return; }
   drag = { kind, id: e.pointerId, hist: [] };
   try { cv.setPointerCapture(e.pointerId); } catch (_) {}
   if (kind === 'cat') { setState('held'); cat.vx = cat.vy = 0; }
@@ -756,7 +933,7 @@ window.addEventListener('pointerdown', e => {
 window.addEventListener('pointermove', e => {
   if (!TAURI) { const p = toWorld(e); mouse.x = p.x; mouse.y = p.y; }
   if (drag && e.pointerId === drag.id) { moveDrag(e); return; }
-  if (!TAURI) document.body.classList.toggle('grab', !!hitTest(toWorld(e)));
+  if (!TAURI) { stroke(toWorld(e)); setCursor(hitTest(toWorld(e))); }
 });
 function moveDrag(e) {
   const p = toWorld(e);
@@ -813,11 +990,15 @@ function frame(now) {
     else if (toy === 'laser') updateLaser();
     else updateWand();
     updateCat();
+    updateFx();
     acc -= 1000 / 60;
   }
   ctx.clearRect(0, 0, W, H);
   if (toy === 'ball') { drawRope(); drawBall(); }
+  if (snack) drawSnack(Math.round(snack.x) - 3, Math.round(snack.y), snack.bites);
   drawCat();
+  drawFx();
+  drawBubble();
   if (toy === 'laser') drawLaser();                    // 紅點照在貓身上，所以畫在貓上面
   if (toy === 'wand') drawWand();
   requestAnimationFrame(frame);
