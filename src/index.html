@@ -191,9 +191,10 @@ const litterReady = () => litter.on && !litter.held && !litter.tipped && litter.
 const treeReady   = () => tree.on && !tree.held && tree.y >= FLOOR;
 const boxReady    = () => box.on && !box.held && box.y >= FLOOR;
 
-function settle(o, half, slide = 0.8) {                // 家具、便便、貓條：重力、落地、地面摩擦；回傳落地那一下有多快
+function settle(o, half, slide = 0.8, top = 0) {       // 家具、便便、貓條：重力、落地、地面摩擦；回傳落地那一下有多快
   if (o.held) return 0;
   o.vy += G; o.x += o.vx; o.y += o.vy;
+  if (o.y < top) { o.y = top; o.vy = Math.abs(o.vy) * 0.5; }   // 往上甩太用力：撞到長條頂端彈回來（跟毛球一樣），不會飛出視窗；top 是底邊最高到哪
   let hit = 0;
   if (o.y >= FLOOR) {
     if (o.vy > 1) hit = Math.hypot(o.vx, o.vy);
@@ -208,23 +209,23 @@ function settle(o, half, slide = 0.8) {                // 家具、便便、貓�
 
 function updateFurniture() {
   if (litter.on) {
-    const v = settle(litter, HALF.litter);
+    const v = settle(litter, HALF.litter, 0.8, TOP.litter);
     if (v > TIP && !litter.tipped) tipLitter();
     else if (v) thud(litter.x, 12);
     if (!litter.tipped && litter.poop.length >= 2 && Math.random() < 1 / 70) stink(litter.x + rand(-8, 8), litter.y - 13);
   }
   if (tree.on) {
-    if (settle(tree, HALF.tree)) thud(tree.x, 11);
+    if (settle(tree, HALF.tree, 0.8, TOP.tree)) thud(tree.x, 11);
     pom[0].x = tree.x + 11; pom[0].y = tree.y - 16;
     stepRope(pom, 2);
   }
   if (box.on) {
-    if (settle(box, HALF.box)) thud(box.x, 12);
+    if (settle(box, HALF.box, 0.8, TOP.box)) thud(box.x, 12);
     box.shake = Math.max(0, box.shake - 1);
   }
   for (let i = poos.length - 1; i >= 0; i--) {
     const q = poos[i], y0 = q.y;
-    settle(q, 3, 0.75);
+    settle(q, 3, 0.75, 6);
     if (q.buried) q.buried--;
     if (q.held) continue;
     // 丟進（或掉在）立著的貓砂盆裡：回到盆子裡
@@ -235,7 +236,7 @@ function updateFurniture() {
     } else if (q.y >= FLOOR && Math.random() < 1 / 50) stink(q.x + rand(-2, 2), q.y - 5);
   }
   if (treat) {
-    settle(treat, 6, 0.85);
+    settle(treat, 6, 0.85, 4);
     if (!treat.held && treat.y >= FLOOR) treat.landed = true;
     if (treat.landed && treat.paste <= 0) { poof(treat.x, FLOOR - 2); treat = null; }   // 舔完的空袋子：落地就收掉
   }
@@ -383,15 +384,14 @@ function nextIdle() {                                  // 閒著的時候要做�
   if (cat.energy < 20) return treeReady() && Math.random() < 0.4 ? goTree('climb') : setState('sleep', rand(600, 900));   // 睏了：有時候爬到貓跳台上睡
   if (snack && snack.landed) return setState('fetch', 600);   // 地上還有妙脆角沒吃完
   if (wantTreat()) return goTreat();                   // 地上有貓條
-  if (!pooCD && litterReady()) return setState('toLitter', 900);   // 想上廁所
-  const q = stinky();
-  if (q) { cat.poo = q; return setState('sniffGo', 900); }   // 地上有便便：好奇地湊過去聞
+  if (!pooCD && litterReady()) return setState('toLitter', trek(0.6));   // 想上廁所
+  if (goSniff()) return;                               // 地上有便便：好奇地湊過去聞
   if (!wishCD) {                                       // 冒個泡泡：擲到大泡泡就想著一張圖片，不然就討摸或盯著零食流口水
     wishCD = rand(3600, 9000);                         // 下一次 1～2.5 分鐘後
     if (pic) { const p = pic; pic = null; return dream(p); }
     return Math.random() < 0.5 ? setState('beg', 600) : crave();
   }
-  if (!boxCD && boxReady()) { boxCD = rand(10800, 21600); return setState('toBox', 900); }   // 偷偷躲進紙箱；下一次 3～6 分鐘後
+  if (!boxCD && boxReady()) { boxCD = rand(10800, 21600); return setState('toBox', trek(0.45)); }   // 偷偷躲進紙箱；下一次 3～6 分鐘後
   if (!treeCD && treeReady()) { treeCD = rand(7200, 18000); return goTree(); }               // 去貓跳台；下一次 2～5 分鐘後
   const r = Math.random();
   if (r < (toy === 'ball' ? 0.45 : 0.7) && cat.energy > 30) return setState('stare', rand(40, 90));
@@ -401,6 +401,17 @@ function nextIdle() {                                  // 閒著的時候要做�
 }
 
 const stinky = () => poos.find(q => !q.held && !q.buried && q.y >= FLOOR);   // 地上有沒有還沒「埋」過的便便
+/* 走去家具、便便最多花幾格（逾時就算了）：從畫面一頭走到另一頭的時間再多 2 秒。
+   不能寫死：螢幕越寬要走越久，寫死 900 格的話 1920 寬的螢幕上，常常偷偷溜到一半就坐下來不去紙箱了 */
+const trek = v => W / v + 120;
+function goSniff() {                                   // 地上有還沒埋過的便便：好奇地湊過去聞
+  const q = stinky();
+  if (!q) return false;
+  cat.poo = q;
+  setState('sniffGo', trek(0.3));
+  return true;
+}
+const sniffAt = q => clamp(q.x + (Math.sign(cat.x - q.x) || 1) * 15, 12, W - 12);   // 聞便便時站在哪：便便旁邊，鼻子剛好湊到
 const wantTreat = () => treat && treat.paste > 0 && (treat.held || (treat.landed && !cat.treatCD));
 function goTreat() {                                   // 貓條！在貓跳台上就先跳下來
   if (cat.perch) return hopDown(treat.x);
@@ -413,7 +424,7 @@ function crave() {                                     // 盯著想像泡泡裡�
 }
 function goTree(plan = Math.random() < 0.35 ? 'scratch' : 'climb') {   // 去貓跳台：先磨爪，或直接跳上去
   cat.plan = plan;
-  setState('toTree', 900);
+  setState('toTree', trek(0.6));
 }
 function perchIdle() {                                 // 在貓跳台上閒著：坐著俯瞰、趴著、舔毛、睡覺；待夠了或有事就跳下來
   if (quiet) return setState('sleep', 600);
@@ -521,6 +532,7 @@ function updateCat() {
     case 'sit': case 'lick': case 'rest':              // rest：趴成一條麵包休息（多半是在貓跳台上俯瞰）
       cat.energy = Math.min(100, cat.energy + 0.005);
       if (wantTreat()) goTreat();
+      else if (!cat.perch && !quiet && stinky()) goSniff();   // 便便剛掉到地上（盆子翻倒、被丟過來）：馬上好奇地湊過去，不用等發完呆
       else if (!quiet && cat.energy > 25 && lively && (reach || !cat.bored) && Math.random() < 0.03)
         setState('stare', rand(15, 30));
       else if (cat.t > cat.dur) nextIdle();
@@ -530,12 +542,17 @@ function updateCat() {
       faceBall();
       if (wantTreat()) { goTreat(); break; }
       if (cat.perch) { if (cat.t > cat.dur) hopDown(p.x); break; }   // 在貓跳台上：看夠了就跳下去追
+      if (cat.t > cat.dur && !quiet && goSniff()) break;   // 玩到一半發現地上有便便：先去聞（不然要玩到累才會注意到）
       if (toy !== 'ball') {                            // 雷射光、逗貓棒：看夠了就追
         if (cat.t > cat.dur) {
           if (cat.energy > 20) nextHunt(p, reach); else setState('sit', 120);
         }
       } else if (cat.t > cat.dur) {
         if (Math.abs(d) > 13) setState('chase', 480);
+        else if (Math.abs(d) < 6 && (cat.x < 14 || cat.x > W - 14)) {   // 球滾到肚子底下、貓又頂著畫面邊邊：撥不到也撲不過去，先往裡面退開一步
+          cat.target = clamp(ball.x + (cat.x < W / 2 ? 14 : -14), 12, W - 12);
+          setState('walk', 120);
+        }
         else if (ballOnGround && ballSpeed < 0.5 && Math.random() < 0.6) setState('swipe', 30);
         else setState('crouch', rand(35, 70));
       }
@@ -778,11 +795,11 @@ function updateCat() {
       if (cat.t > cat.dur) leaveLitter(true);
       break;
 
-    case 'sniffGo': {                                  // 好奇：壓低身體，慢慢湊過去
+    case 'sniffGo': {                                  // 好奇：遠的話先走過去，最後一段壓低身體慢慢湊過去
       const q = cat.poo;
       if (!q || !poos.includes(q) || q.held) { setState('sit', 60); break; }
-      const side = Math.sign(cat.x - q.x) || 1;
-      if (goTo(q.x + side * 15, 0.3)) { cat.dir = -side; setState('sniff', rand(70, 110)); }
+      const tx = sniffAt(q);
+      if (goTo(tx, Math.abs(tx - cat.x) > 40 ? 0.6 : 0.3)) { cat.dir = Math.sign(q.x - cat.x) || cat.dir; setState('sniff', rand(70, 110)); }
       else if (cat.t > cat.dur) setState('sit', 60);
       break;
     }
@@ -826,7 +843,10 @@ function updateCat() {
       cat.energy = Math.min(100, cat.energy + (nap ? 0.15 : 0.005));
       if (!nap && cat.t % 240 === 120 && Math.random() < 0.6) box.shake = 14;
       if (!nap && toy === 'ball' && cat.t > 120 && ballSpeed > 0.8 && Math.abs(ball.x - box.x) < 36) boo(ball.x, false);   // 毛球滾過去：撲出來抓
-      else if (!quiet && cat.t > cat.dur) hop(box.x + cat.dir * 20, FLOOR, 10, 28, () => { cat.in = null; setState('sit', rand(60, 120)); });   // 躲夠了，自己出來
+      else if (!quiet && (cat.t > cat.dur || (!nap && wantTreat()))) {   // 躲夠了自己出來；有貓條也出來（往貓條那邊跳）
+        if (wantTreat()) cat.dir = Math.sign(treat.x - box.x) || cat.dir;
+        hop(box.x + cat.dir * 20, FLOOR, 10, 28, () => { cat.in = null; setState('sit', rand(60, 120)); });
+      }
       break;
     }
 
@@ -1211,7 +1231,8 @@ function currentPose() {
     case 'held': case 'fall': return heldPose(f);
     case 'rest': return loafPose(f, false);
     case 'zoom': case 'toLitter': case 'toTree': return standPose(f);
-    case 'toBox': case 'sniffGo': return crouchPose(f, true);
+    case 'toBox': return crouchPose(f, true);
+    case 'sniffGo': return cat.poo && Math.abs(sniffAt(cat.poo) - cat.x) > 40 ? standPose(f) : crouchPose(f, true);   // 遠的時候走過去，近了才壓低
     case 'squat': return squatPose();
     case 'cover': case 'bury': return buryPose(f);
     case 'sniff': return eatPose(f, true);
@@ -1889,7 +1910,7 @@ function setFurniture(name, on) {                      // 系統匣的「家具�
   f.held = false; f.vx = f.vy = 0; f.y = FLOOR;
   if (name === 'tree') initPom();
   if (on) return;
-  if (name === 'litter') litter.spill = [];
+  if (name === 'litter') { litter.tipped = false; litter.spill = []; }   // 翻倒的盆子收起來，下次擺出來就是立好的
   if (cat.in === name || (name === 'tree' && cat.perch)) tumble();   // 貓在裡面、上面：掉回地上
 }
 

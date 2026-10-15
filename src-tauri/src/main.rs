@@ -356,11 +356,18 @@ fn main() {
             win.show()?;
             watch_cursor(win.clone());
 
-            // 系統匣：換玩具、換螢幕、打開泡泡圖片資料夾、安靜模式（開會、分享螢幕時讓貓去睡）、結束
+            // 系統匣：換玩具、收放家具、餵貓條、換螢幕、打開泡泡圖片資料夾、安靜模式（開會、分享螢幕時讓貓去睡）、結束
             let toy_ball = CheckMenuItem::with_id(app, "toy:ball", "毛球", true, true, None::<&str>)?;
             let toy_laser = CheckMenuItem::with_id(app, "toy:laser", "雷射光", true, false, None::<&str>)?;
             let toy_wand = CheckMenuItem::with_id(app, "toy:wand", "逗貓棒", true, false, None::<&str>)?;
             let toys = Submenu::with_items(app, "玩具", true, &[&toy_ball, &toy_laser, &toy_wand])?;
+            // 家具：一開始全部擺出來，可以個別收起來。跟前端一樣不記設定，重開又會全部擺出來
+            let furn_litter = CheckMenuItem::with_id(app, "furniture:litter", "貓砂盆", true, true, None::<&str>)?;
+            let furn_tree = CheckMenuItem::with_id(app, "furniture:tree", "貓跳台", true, true, None::<&str>)?;
+            let furn_box = CheckMenuItem::with_id(app, "furniture:box", "紙箱", true, true, None::<&str>)?;
+            let furniture = Submenu::with_items(app, "家具", true, &[&furn_litter, &furn_tree, &furn_box])?;
+            // 餵貓條：在貓前面掉一條下來（地上已經有一條就不會再掉）
+            let treat = MenuItem::with_id(app, "treat", "餵貓條", true, None::<&str>)?;
             // 螢幕：啟動當下接著的螢幕，由左到右編號。之後才接上的螢幕要重開毛球貓才會出現
             let mut monitors = win.available_monitors()?;
             monitors.sort_by_key(|m| (m.position().x, m.position().y));
@@ -387,9 +394,10 @@ fn main() {
             let pictures = MenuItem::with_id(app, "pictures", "打開泡泡圖片資料夾", true, None::<&str>)?;
             let quiet = CheckMenuItem::with_id(app, "quiet", "安靜模式", true, false, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "結束毛球貓", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&toys, &screens, &pictures, &quiet, &quit])?;
+            let menu = Menu::with_items(app, &[&toys, &furniture, &treat, &screens, &pictures, &quiet, &quit])?;
             let quiet_item = quiet.clone();
             let toy_items = [toy_ball, toy_laser, toy_wand];
+            let furniture_items = [furn_litter, furn_tree, furn_box];
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().expect("缺少圖示").clone())
                 .tooltip("毛球貓")
@@ -400,7 +408,20 @@ fn main() {
                         let _ = app.emit("quiet", on);
                     }
                     "pictures" => open_picture_dir(app),
+                    "treat" => {
+                        let _ = app.emit("treat", ());
+                    }
                     "quit" => app.exit(0),
+                    // 家具各自勾選：點了勾勾會自己切換，照現在的勾選狀態請前端擺出來或收起來
+                    id if id.starts_with("furniture:") => {
+                        for item in &furniture_items {
+                            let mine: &str = item.id().as_ref();
+                            if mine == id {
+                                let on = item.is_checked().unwrap_or(true);
+                                let _ = app.emit("furniture", (&id[10..], on));
+                            }
+                        }
+                    }
                     // 玩具只能選一個：點到的打勾，其他取消
                     id if id.starts_with("toy:") => {
                         for item in &toy_items {
