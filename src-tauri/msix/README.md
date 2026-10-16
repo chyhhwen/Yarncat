@@ -33,7 +33,7 @@
 
 推 `v` 或 `V` 開頭的標籤（跟平常發版一樣）。GitHub Actions 包好 Windows 安裝檔之後會接著包 MSIX，放在那次執行的頁面最下面「Artifacts」的 `msix`：
 
-- `YarnCat_x.x.x.0_x64.msix`：上傳到 Partner Center
+- `YarnCat_x.x.x.0_x64.msix`：上傳到 Partner Center。沒有簽章，點兩下裝不起來（見下一節）
 - `test` 資料夾：在自己電腦測試用
 
 還不能送審的原因（Partner Center 的值還沒填、版本號是 0 開頭）會用黃色警告顯示在那次執行的頁面最上面。
@@ -47,12 +47,16 @@ powershell -ExecutionPolicy Bypass -File src-tauri\msix\build.ps1
 
 ## 在自己電腦測試
 
-1. 「設定」→「系統」→「開發人員專用」，打開「開發人員模式」。
-2. 把下載的 `msix.zip` 解壓縮，在 `test` 資料夾裡按右鍵「在終端機中開啟」，執行：
+不要直接點兩下 .msix：它沒有簽章，Windows 會說「無法驗證此應用程式套件的發行者憑證」（0x800B010A）。這是正常的，商店審核通過後會幫它簽章。要在自己電腦測，用 `test` 資料夾：
+
+1. 按 Win + R，輸入 `ms-settings:developers`，打開「開發人員模式」（要系統管理員權限）。
+2. 裝了 GitHub 版的毛球貓的話，先從系統匣「結束毛球貓」，不然畫面上會有兩隻貓。
+3. 把下載的 `msix.zip` 解壓縮，在 `test` 資料夾裡按右鍵「在終端機中開啟」，執行：
    ```
    Add-AppxPackage -Register "$PWD\AppxManifest.xml"
    ```
-3. 從開始功能表打開毛球貓。它直接執行 `test` 資料夾裡的檔案，測完之前不要刪掉資料夾。
+   出現 0x80073CFF 表示開發人員模式還沒打開。
+4. 從開始功能表打開毛球貓。它直接執行 `test` 資料夾裡的檔案，測完之前不要刪掉資料夾。
 
 移除：「設定」→「應用程式」→「已安裝的應用程式」→ 毛球貓 →「解除安裝」。要從商店安裝之前也要先移除，兩個是同一個 app。
 
@@ -62,13 +66,13 @@ powershell -ExecutionPolicy Bypass -File src-tauri\msix\build.ps1
 
 上傳 .msix 之後，Partner Center 會多問幾件事，下面的文字可以直接貼。
 
-**runFullTrust 的理由**（欄位很短，太長會被截掉）：
+**runFullTrust 的理由**（Submission options 頁。有人遇過這欄超過字數會被截掉，所以重點放在最前面）：
 
 ```
-Win32 desktop app (Tauri + WebView2) packaged as MSIX. Needs full trust for its transparent always-on-top window and tray icon.
+Win32 desktop pet (Tauri + WebView2) packaged as MSIX, not UWP. Full trust is needed for its transparent, always-on-top, click-through window above the taskbar, its tray menu, reading the cursor position so the cat can chase toys, and reading images from Pictures\YarnCat.
 ```
 
-**Notes for certification**（毛球貓沒有視窗，要告訴審核人員去哪裡找）：
+**Notes for certification**（貼在「Additional Testing Information」頁。毛球貓沒有視窗，要告訴審核人員去哪裡找）：
 
 ```
 YarnCat has no regular window or taskbar button. After launch, a pixel cat appears at the bottom of the primary screen, just above the taskbar. All options (toys, furniture, quiet mode, quit) are in the cat icon in the system tray; on Windows 11 it may be hidden under the ^ overflow. Drag the cat or the yarn ball with the mouse to play. The app makes no network connections.
@@ -78,6 +82,7 @@ YarnCat has no regular window or taskbar button. After launch, a pixel cat appea
 
 - 隱私權政策網址：可以連到 README 的「隱私」一節，但「安裝程式會下載 WebView2」那條不適用商店版
 - 至少一張 1366×768 以上的 PNG 截圖：`docs` 裡的 GIF 是網頁版錄的，要另外截桌寵版在桌面上的樣子
+- Store logos 的「Store display images」：300×300、150×150、71×71 三格分別放 `store/app-tile-300.png`、`app-tile-150.png`、`app-tile-71.png`，一樣是像素畫整數倍放大。不給的話商店會拿套件裡的圖示放大。上面的 9:16 Poster art、1:1 Box art 對 app 是選填，要放的話用 `store/poster-1440x2160.png`、`store/box-2160.png`（貓放在上面三分之二，下面留給商店疊字）
 - 年齡分級問卷、介紹文字
 
 ## 注意
