@@ -78,9 +78,36 @@ Win32 desktop pet (Tauri + WebView2) packaged as MSIX, not UWP. Full trust is ne
 YarnCat has no regular window or taskbar button. After launch, a pixel cat appears at the bottom of the primary screen, just above the taskbar. All options (toys, furniture, quiet mode, quit) are in the cat icon in the system tray; on Windows 11 it may be hidden under the ^ overflow. Drag the cat or the yarn ball with the mouse to play. The app makes no network connections.
 ```
 
+**隱私權政策**（Partner Center 規定一定要有，這次選「Provide privacy policy text」直接貼文字。這份只存在 Partner Center，要改的時候這裡也一起改。做好串門子之後「不會連上網路」就不成立了，要改寫）：
+
+```
+毛球貓 YarnCat 隱私權政策
+
+毛球貓不會連上網路，也不會收集、儲存或傳送任何個人資料。
+
+・程式裡沒有任何網路連線、統計或自動更新功能。
+・游標位置只用來讓貓追玩具、判斷你有沒有點到貓，不會記錄下來。
+・「圖片\YarnCat」資料夾裡的圖片只在你的電腦上讀取、畫在泡泡裡，不會傳到任何地方。
+・畫面由 Windows 的 Microsoft Edge WebView2 元件顯示。這個元件，以及從 Microsoft Store 下載、更新毛球貓的過程，由微軟依照微軟隱私權聲明處理。
+
+有問題請到 https://github.com/chyhhwen/Yarncat/issues 回報。
+最後更新：2026 年 10 月 16 日
+
+YarnCat Privacy Policy
+
+YarnCat does not connect to the internet and does not collect, store, or transmit any personal information.
+
+- The app has no network connections, analytics, or automatic updates of its own.
+- The cursor position is used only to let the cat chase toys and to detect clicks on the cat. It is never recorded.
+- Images in the Pictures\YarnCat folder are read only on your computer to show them in the cat's bubbles. They are never sent anywhere.
+- The app is displayed with Microsoft Edge WebView2, a Windows component. That component, and downloading and updating YarnCat through the Microsoft Store, are handled by Microsoft under the Microsoft Privacy Statement.
+
+Questions: https://github.com/chyhhwen/Yarncat/issues
+Last updated: October 16, 2026
+```
+
 商店頁另外要準備：
 
-- 隱私權政策網址：可以連到 README 的「隱私」一節，但「安裝程式會下載 WebView2」那條不適用商店版
 - 至少一張 1366×768 以上的 PNG 截圖：`docs` 裡的 GIF 是網頁版錄的，要另外截桌寵版在桌面上的樣子
 - Store logos 的「Store display images」：300×300、150×150、71×71 三格分別放 `store/app-tile-300.png`、`app-tile-150.png`、`app-tile-71.png`，一樣是像素畫整數倍放大。不給的話商店會拿套件裡的圖示放大。上面的 9:16 Poster art、1:1 Box art 對 app 是選填，要放的話用 `store/poster-1440x2160.png`、`store/box-2160.png`（貓放在上面三分之二，下面留給商店疊字）
 - 年齡分級問卷、介紹文字
