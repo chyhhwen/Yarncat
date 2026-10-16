@@ -64,9 +64,11 @@ function resize() {
     cat.x *= oldS / S; ball.x *= oldS / S; ball.y *= oldS / S;
     for (const o of [litter, tree, box, ...poos, ...litter.spill]) o.x *= oldS / S;
     if (treat) treat.x *= oldS / S;
+    if (guest) guest.x *= oldS / S;
     initRope(); initWand(); initPom();
   }
-  cat.x = clamp(cat.x, 12, W - 12);
+  if (!['leave', 'away', 'arrive'].includes(cat.state)) cat.x = clamp(cat.x, 12, W - 12);   // 出門、回家時本來就在畫面外
+  if (guest && !['enter', 'exit'].includes(guest.state)) guest.x = clamp(guest.x, 12, W - 12);
   if (cat.state !== 'held') cat.y = cat.y >= oldFloor ? FLOOR : Math.min(cat.y, FLOOR);   // 原本站在地上就繼續站在地上
   ball.x = clamp(ball.x, ball.r, W - ball.r);
   if (snack) {
@@ -319,12 +321,14 @@ const RATE = { sit: 20, lick: 9, stare: 30, walk: 9, chase: 5, crouch: 6, pounce
   hunt: 5, aim: 6, leap: 99, clutch: 12, slap: 14, loaf: 12, flop: 18,
   beg: 20, drool: 15, dream: 20, pet: 10, fetch: 9, eat: 10,
   rest: 12, hop: 99, zoom: 4, treat: 6, toLitter: 9, squat: 12, cover: 7, sniffGo: 12, sniff: 7, stink: 10, bury: 7,
-  toBox: 12, hide: 10, boo: 99, spook: 9, toTree: 9, scratch: 7, toPom: 5, pom: 14 };   // 幾格換一張動畫
+  toBox: 12, hide: 10, boo: 99, spook: 9, toTree: 9, scratch: 7, toPom: 5, pom: 14,
+  leave: 9, away: 99, arrive: 9, meet: 9, boop: 7, enter: 9, exit: 9, wait: 30 };   // 幾格換一張動畫（enter、exit、wait 是客人貓用的）
 const cat = { x: 0, y: 0, vx: 0, vy: 0, dir: 1, state: 'sit', t: 0, dur: 60, frame: 0,
   energy: 80, target: 0, high: false, got: false, low: false, up: false,
   miss: 0, bored: 0,                                   // miss：盯著搆不到的東西多久了；bored：放棄後還有多久懶得理它
   perch: false, stay: 0, in: null, jump: null,         // perch：站在貓跳台上（stay 還要待多久）；in：在 'litter' 貓砂盆或 'box' 紙箱裡；jump：正在跳的拋物線
   poo: null, plan: '', scare: false, want: 'snack',    // poo：正在聞的那坨便便；plan：去貓跳台要磨爪還是跳上去；scare：蹦出紙箱是嚇人還是撲毛球；want：想像泡泡裡的零食
+  edge: 1,                                             // 串門子：從哪一邊走出去（1 右邊、-1 左邊），回來就從那一邊走進來
   lv: -2, t0: 0, paw: 0, treatCD: 0 };                 // 貓條：lv 姿勢（-2 跑過去、-1 坐旁邊等、0～2 低頭／坐著／站起來舔、3 伸手搆、4 仰望）、t0 開始等的時候、paw 撥一下還剩幾格（撥小毛球也用）、treatCD 等膩了多久不理它
 let quiet = false;
 let toy = 'ball';                                      // 'ball' 毛球、'laser' 雷射光、'wand' 逗貓棒
@@ -336,8 +340,10 @@ let pooCD = rand(10800, 21600);                        // 還有幾格才想上�
 let boxCD = rand(5400, 10800);                         // 還有幾格才想躲進紙箱
 let treeCD = rand(3600, 7200);                         // 還有幾格才想去貓跳台
 let pomCD = rand(7200, 14400);                         // 還有幾格才想自己去撥小毛球（第一次 2～4 分鐘後）
-// 這些時候貓在忙自己的事：丟毛球、換玩具都不理
-const BUSY = ['held', 'fall', 'hop', 'pet', 'eat', 'treat', 'squat', 'cover', 'sniff', 'stink', 'bury', 'hide', 'boo', 'spook', 'scratch'];
+let visitCD = rand(7200, 14400);                       // 還有幾格才想去隔壁串門子（有了隔壁才重新算，見 onLink）
+// 這些時候貓在忙自己的事：丟毛球、換玩具都不理（後面五個是串門子：出門、不在家、回家、跟客人打招呼）
+const BUSY = ['held', 'fall', 'hop', 'pet', 'eat', 'treat', 'squat', 'cover', 'sniff', 'stink', 'bury', 'hide', 'boo', 'spook', 'scratch',
+  'leave', 'away', 'arrive', 'meet', 'boop'];
 
 function setState(s, dur = 60) {
   cat.state = s; cat.t = 0; cat.dur = dur; cat.frame = 0;
@@ -396,6 +402,7 @@ function nextIdle() {                                  // 閒著的時候要做�
   if (!boxCD && boxReady()) { boxCD = rand(10800, 21600); return setState('toBox', trek(0.45)); }   // 偷偷躲進紙箱；下一次 3～6 分鐘後
   if (!treeCD && treeReady()) { treeCD = rand(7200, 18000); return goTree(); }               // 去貓跳台；下一次 2～5 分鐘後
   if (!pomCD && pomSpot() !== null) return setState('toPom', trek(1.1));   // 自己跑去撥小毛球（坐下來開始撥才重新計時）
+  if (!visitCD && canVisit()) return setState('leave', trek(0.6));         // 去隔壁串門子（回到家才重新計時）
   const r = Math.random();
   if (r < (toy === 'ball' ? 0.45 : 0.7) && cat.energy > 30) return setState('stare', rand(40, 90));
   if (r < 0.65) return setState('lick', rand(90, 150));
@@ -536,6 +543,7 @@ function updateCat() {
   wishCD = Math.max(0, wishCD - 1);
   if (cd > PREP && wishCD <= PREP) preparePic();       // 快冒泡泡了：先決定大泡泡還是小泡泡
   pooCD = Math.max(0, pooCD - 1); boxCD = Math.max(0, boxCD - 1); treeCD = Math.max(0, treeCD - 1); pomCD = Math.max(0, pomCD - 1);
+  visitCD = Math.max(0, visitCD - 1);
   cat.treatCD = Math.max(0, cat.treatCD - 1);
   if (cat.perch) cat.stay = Math.max(0, cat.stay - 1);
 
@@ -943,8 +951,41 @@ function updateCat() {
       }
       break;
     }
+
+    /* ── 以下是串門子用的狀態：去隔壁、不在家、回家、跟隔壁來的客人碰鼻子 ── */
+    case 'leave':                                      // 去隔壁：往隔壁那一邊一路走出畫面
+      if (!peer) { setState('arrive', 600); break; }   // 隔壁不見了：走回來
+      if (wantTreat() && cat.x > 12 && cat.x < W - 12) { goTreat(); break; }   // 還沒走出去就有貓條：先吃
+      cat.edge = cat.dir = peerSide();
+      cat.x += cat.dir * 0.6;
+      if (cat.x > W + 16 || cat.x < -16) goAway();
+      else if (cat.t > cat.dur) setState('sit', 60);
+      break;
+
+    case 'away':                                       // 在隔壁作客：這邊沒有貓，等隔壁說牠回來了
+      if (!peer || cat.t > cat.dur) callHome();        // 隔壁不見了，或待太久（隔壁的畫面可能沒在動）：叫牠回來
+      break;
+
+    case 'arrive':                                     // 從隔壁回來：從邊邊走進畫面
+      if (goTo(clamp(cat.x, 36, W - 36), 0.6)) setState(Math.random() < 0.5 ? 'lick' : 'sit', rand(90, 150));
+      break;
+
+    case 'meet': {                                     // 隔壁的貓來了：走過去打招呼
+      if (!guest || guest.state !== 'wait') { setState('sit', 60); break; }
+      const s = -guest.edge;                           // 從靠畫面裡面的那一側過去，兩隻才都在畫面裡
+      if (goTo(guest.x + s * 26, 0.8)) {               // 站到鼻子剛好碰到的地方
+        cat.dir = -s; guest.dir = s;
+        setState('boop', 150); guestSet('boop', 150);
+      } else if (cat.t > cat.dur) setState('sit', 60);
+      break;
+    }
+
+    case 'boop':                                       // 碰鼻子：聞一聞，冒愛心
+      if (!guest || cat.t > cat.dur) { setState(Math.random() < 0.5 ? 'sit' : 'lick', rand(90, 150)); break; }
+      if (cat.t % 40 === 20) puff('heart', (cat.x + guest.x) / 2 - 1, cat.y - 16);
+      break;
   }
-  cat.x = clamp(cat.x, 12, W - 12);
+  if (!['leave', 'away', 'arrive'].includes(cat.state)) cat.x = clamp(cat.x, 12, W - 12);   // 出門、回家時會走到畫面外
   cat.energy = clamp(cat.energy, 0, 100);
 }
 
@@ -1269,7 +1310,8 @@ function currentPose() {
     case 'sleep': return sleepPose(f);
     case 'held': case 'fall': return heldPose(f);
     case 'rest': return loafPose(f, false);
-    case 'zoom': case 'toLitter': case 'toTree': case 'toPom': return standPose(f);
+    case 'zoom': case 'toLitter': case 'toTree': case 'toPom': case 'leave': case 'arrive': case 'meet': return standPose(f);
+    case 'boop': return eatPose(f, true);              // 碰鼻子：低頭湊過去聞
     case 'pom': return cat.paw ? sitPose(cat.paw > SWAT / 2 ? 0 : 1, 'swipe') : sitPose(f, 'stare');   // 前掌先舉起來，再拍下去
     case 'toBox': return crouchPose(f, true);
     case 'sniffGo': return cat.poo && Math.abs(sniffAt(cat.poo) - cat.x) > 40 ? standPose(f) : crouchPose(f, true);   // 遠的時候走過去，近了才壓低
@@ -1285,19 +1327,21 @@ function currentPose() {
   }
 }
 
-function drawRects(ox, oy, parts, det, dir = 1) {      // 畫一組長方形：parts 先統一描黑邊再填色，det 不描邊；dir < 0 左右翻過來
+// 畫一組長方形：parts 先統一描黑邊再填色，det 不描邊；dir < 0 左右翻過來；pal：顏色表（換毛色時用 coatPal 給的）
+function drawRects(ox, oy, parts, det, dir = 1, pal = C) {
   const X = (x, w) => dir > 0 ? ox + x : ox - x - w;
-  ctx.fillStyle = C.O;
+  ctx.fillStyle = pal.O;
   for (const [x, y, w, h] of parts) ctx.fillRect(X(x - 1, w + 2), oy + y - 1, w + 2, h + 2);
-  for (const [x, y, w, h, c] of parts) { ctx.fillStyle = C[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
-  for (const [x, y, w, h, c] of det)   { ctx.fillStyle = C[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
+  for (const [x, y, w, h, c] of parts) { ctx.fillStyle = pal[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
+  for (const [x, y, w, h, c] of det)   { ctx.fillStyle = pal[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
 }
 function drawCat() {
+  if (cat.state === 'away') return;                    // 在隔壁作客
   const [parts, det] = currentPose();
   const run = ['chase', 'hunt', 'fetch', 'zoom', 'toPom'].includes(cat.state) || (cat.state === 'treat' && cat.lv === -2);
   const ox = Math.round(cat.x) + (cat.state === 'squat' && cat.t % 8 < 4 ? 1 : 0);   // 用力到發抖
   const oy = Math.round(cat.y) - (run && cat.frame % 2 ? 1 : 0);
-  drawRects(ox, oy, parts, det, cat.dir);
+  drawRects(ox, oy, parts, det, cat.dir, coatPal(myCoat));
   if (cat.state === 'treat') drawTongue(ox, oy);
   if (cat.state === 'sleep') drawZ(ox + cat.dir * 8, oy - 14);
   if (onBack() && cat.energy >= 30) drawStars(ox + cat.dir * 9, oy - 14);
@@ -1311,8 +1355,8 @@ function drawTongue(ox, oy) {                          // 舔貓條：粉紅色�
   ctx.fillStyle = C.P;
   line(x0, y0, x1, y1);
 }
-function drawZ(x, y) {                                 // 一個慢慢飄上去的 z
-  const k = (cat.t % 120) / 120;
+function drawZ(x, y, t = cat.t) {                      // 一個慢慢飄上去的 z（t：睡了幾格，客人貓用牠自己的）
+  const k = (t % 120) / 120;
   const zx = Math.round(x + k * 4), zy = Math.round(y - k * 10);
   ctx.globalAlpha = 1 - k;
   ctx.fillStyle = '#ffffff';
@@ -1519,7 +1563,7 @@ function dream(p) {                                    // 冒大泡泡
   setState('dream', 600);
 }
 function dreamNow() {                                  // 網頁版：拖進圖片、按 6，馬上冒大泡泡
-  loadPic().then(p => { if (p && cat.state !== 'held' && cat.y >= FLOOR && !cat.in) dream(p); });
+  loadPic().then(p => { if (p && !['held', 'away'].includes(cat.state) && cat.y >= FLOOR && !cat.in) dream(p); });   // 在隔壁作客時不算
 }
 function bigBox(dir) {                                 // 大泡泡在臉的斜前方，底邊大約在眼睛的高度；太高的話從畫面頂端往下長
   const iw = Math.max(dreamPic.w, PIC_MIN), ih = Math.max(dreamPic.h, PIC_MIN);
@@ -1670,7 +1714,7 @@ function drawPeek() {                                  // 躲在紙箱裡：偶�
   const r = mouse.x > box.x ? 1 : 0, ears = [[-3, -20, 1, 1, 'P'], [3, -20, 1, 1, 'P']];
   drawRects(x, y + 8 - up, [[-4, -19, 9, 6, 'F'], [-4, -21, 2, 2, 'F'], [3, -21, 2, 2, 'F']],
     k % 60 >= 56 ? [...ears, [-3, -16, 2, 1, 'E'], [2, -16, 2, 1, 'E']]   // 眨眼
-                 : [...ears, [-3, -17, 2, 2, 'G'], [2, -17, 2, 2, 'G'], [-3 + r, -17, 1, 2, 'E'], [2 + r, -17, 1, 2, 'E']]);
+                 : [...ears, [-3, -17, 2, 2, 'G'], [2, -17, 2, 2, 'G'], [-3 + r, -17, 1, 2, 'E'], [2 + r, -17, 1, 2, 'E']], 1, coatPal(myCoat));
 }
 function drawPoo(x, y) {                               // 一坨便便，(x, y)：底邊正中間
   drawRects(x, y, [[-2, -2, 5, 2, 'Pb'], [-1, -3, 3, 1, 'Pb'], [0, -4, 1, 1, 'Pb']],
@@ -1722,7 +1766,7 @@ function catBox() {
       if (onBack()) return { x0: x - 18, y0: y - 12, x1: x + 18, y1: y + 1 };
       return { x0: x - 13, y0: y - 17, x1: x + 13, y1: y + 1 };
     case 'rest': return { x0: x - 13, y0: y - 17, x1: x + 13, y1: y + 1 };
-    case 'hide': return { x0: 1, y0: 1, x1: 0, y1: 0 };   // 躲起來了：點到的是紙箱
+    case 'hide': case 'away': return { x0: 1, y0: 1, x1: 0, y1: 0 };   // 躲起來了：點到的是紙箱；在隔壁作客：這邊沒有貓
     case 'boo': return { x0: x - 9, y0: y - 24, x1: x + 9, y1: y + 1 };
     case 'scratch': return { x0: x - 11, y0: y - 25, x1: x + 9, y1: y + 1 };
     case 'spook': return { x0: x - 14, y0: y - 23, x1: x + 14, y1: y + 1 };
@@ -1750,6 +1794,7 @@ function hitTest(p) {
   const b = bubbleBox();
   if (b && inBox(p, b)) return 'bubble';
   if (inBox(p, catBox())) return 'cat';
+  if (guest && inBox(p, guestBox())) return 'guest';   // 隔壁來的客人：可以摸，不能拎
   if (toy === 'ball' && inBox(p, ballBox())) return 'ball';   // 雷射光、逗貓棒不擋滑鼠
   if (treat && !treat.held && inBox(p, treatHit())) return 'treat';
   if (pooAt(p)) return 'poo';
@@ -1796,15 +1841,17 @@ if (TAURI) {
 } else {
   document.body.classList.add('browser');
   // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒；4 討摸泡泡、5 想吃零食的泡泡、6 大泡泡（要先拖圖片進來）；
-  // 7 掉一條貓條；8 想上廁所、9 想躲紙箱、0 想去貓跳台（閒著的話馬上去）
+  // 7 掉一條貓條；8 想上廁所、9 想躲紙箱、0 想去貓跳台、v 想去隔壁串門子（閒著的話馬上去）；c 換毛色
+  // 開兩個並排的視窗就互為隔壁（見「串門子」）
   window.addEventListener('keydown', e => {
     const t = { 1: 'ball', 2: 'laser', 3: 'wand' }[e.key];
     if (t) setToy(t);
-    if ((e.key === '4' || e.key === '5') && cat.state !== 'held' && cat.y >= FLOOR && !cat.in)
+    if ((e.key === '4' || e.key === '5') && !['held', 'away'].includes(cat.state) && cat.y >= FLOOR && !cat.in)
       e.key === '4' ? setState('beg', 600) : crave();
     if (e.key === '6') dreamNow();
     if (e.key === '7') giveTreat();
-    const urge = { 8: () => pooCD = 0, 9: () => boxCD = 0, 0: () => treeCD = 0 }[e.key];
+    if (e.key === 'c') nextCoat();
+    const urge = { 8: () => pooCD = 0, 9: () => boxCD = 0, 0: () => treeCD = 0, v: () => visitCD = 0 }[e.key];
     if (urge) { urge(); if (['sit', 'lick', 'walk', 'stare', 'rest'].includes(cat.state)) nextIdle(); }
   });
   // 網頁版沒有圖片資料夾：把圖片拖進視窗，大泡泡就從這些圖片裡挑（重新整理就要再拖一次）
@@ -1816,8 +1863,8 @@ if (TAURI) {
   });
 }
 function setCursor(hit) {
-  document.body.classList.toggle('grab', !!hit && hit !== 'bubble');
-  document.body.classList.toggle('poke', hit === 'bubble');
+  document.body.classList.toggle('grab', !!hit && hit !== 'bubble' && hit !== 'guest');
+  document.body.classList.toggle('poke', hit === 'bubble' || hit === 'guest');
 }
 
 /* ═══ 摸貓：游標在貓身上左右來回滑（不用按），來回 3 次就算在摸 ═══
@@ -1826,14 +1873,17 @@ const PETTABLE = ['sit', 'lick', 'stare', 'walk', 'beg', 'drool', 'dream', 'slee
 const rub = { x: null, dir: 0, flips: 0, last: 0 };
 function stroke(p) {
   const hiding = cat.state === 'hide' && !quiet;
-  if (!(hiding ? inBox(p, boxHit()) : inBox(p, catBox()) && PETTABLE.includes(cat.state))) { rub.x = null; rub.dir = rub.flips = 0; return; }
+  const onCat = hiding ? inBox(p, boxHit()) : inBox(p, catBox()) && PETTABLE.includes(cat.state);
+  const onGuest = !onCat && guest && inBox(p, guestBox()) && GUEST_PETTABLE.includes(guest.state);   // 隔壁來的客人也能摸
+  if (!onCat && !onGuest) { rub.x = null; rub.dir = rub.flips = 0; return; }
   const now = performance.now();
   if (rub.x !== null && Math.abs(p.x - rub.x) >= 1) {
     const s = Math.sign(p.x - rub.x);
     if (rub.dir && s !== rub.dir) {                    // 換方向了，算一次來回
       rub.flips = now - rub.last < 700 ? rub.flips + 1 : 1;
       rub.last = now;
-      if (cat.state === 'pet') cat.dur = Math.max(cat.dur, cat.t + 90);   // 繼續摸就繼續呼嚕
+      if (onGuest) { if (guest.state === 'pet') guest.dur = Math.max(guest.dur, guest.t + 90); else if (rub.flips >= 3) petGuest(); }
+      else if (cat.state === 'pet') cat.dur = Math.max(cat.dur, cat.t + 90);   // 繼續摸就繼續呼嚕
       else if (hiding) { if (rub.flips >= 2) { rub.flips = 0; boo(p.x); } }
       else if (rub.flips >= 3) pet();
     }
@@ -1868,6 +1918,7 @@ window.addEventListener('pointerdown', e => {
   if (!kind) return;
   e.preventDefault();
   if (kind === 'bubble') { popBubble(); return; }
+  if (kind === 'guest') { petGuest(); return; }        // 點一下客人：瞇眼呼嚕
   if (kind === 'box' && cat.state === 'hide') { if (!quiet) boo(p.x); return; }   // 碰到躲著貓的紙箱：蹦出來嚇你
   const obj = { cat, ball, treat, poo: pooAt(p), litter, tree, box }[kind];
   drag = { kind, obj, id: e.pointerId, hist: [], ox: obj.x - p.x, oy: obj.y - p.y, x0: p.x, y0: p.y, t0: performance.now(), moved: 0 };
@@ -1934,8 +1985,12 @@ window.addEventListener('pointercancel', endDrag);
 
 function setQuiet(on) {                                // 系統匣的「安靜模式」
   quiet = on;
-  if (quiet && !['held', 'fall', 'pounce', 'leap', 'clutch', 'hop', 'squat', 'cover', 'hide', 'boo'].includes(cat.state)) setState('sleep', 600);
+  if (quiet && !['held', 'fall', 'pounce', 'leap', 'clutch', 'hop', 'squat', 'cover', 'hide', 'boo', 'away'].includes(cat.state)) setState('sleep', 600);
   if (!quiet && cat.state === 'sleep') setState('sit', 90);
+  if (guest && GUEST_PETTABLE.includes(guest.state)) {   // 客人也一起睡、一起醒
+    if (quiet) guestSet('sleep', 600);
+    else if (guest.state === 'sleep') guestSet('sit', 90);
+  }
 }
 
 function setFurniture(name, on) {                      // 系統匣的「家具」：擺出來或收起來
@@ -1960,6 +2015,192 @@ function setToy(t) {                                   // 系統匣的「玩具�
   else if (!['sleep', ...BUSY].includes(cat.state)) setState('stare', 40);
 }
 
+/* ═══ 串門子：隔壁的貓會來作客，家裡的貓也會去隔壁 ═══
+   貓在誰的畫面上，就由誰跑牠的動作；走過邊界時才傳一則訊息交接，另外每秒互相打招呼對帳。
+   網頁版用 BroadcastChannel 讓同一個瀏覽器的兩個視窗互當隔壁，貓從靠近對方視窗的那一邊走過去；
+   桌寵版之後改成在區網上連線，訊息不變。
+   訊息：hi（每秒一次：毛色、視窗在螢幕上的位置、安靜模式、我的貓在不在你那邊、我家有沒有你的貓）、
+   visit（我的貓走過去了）、home（你的貓走回去了）、recall（我的貓待太久，叫牠回來）、bye（我要關了） */
+const COATS = {                                        // 毛色：換掉毛（F）、斑紋（D）、白襪白胸口（W）、眼睛（G）的顏色
+  gray: {},                                            // 藍灰虎斑白襪（原本的樣子）
+  orange: { F: '#e39a52', D: '#b66d2e', W: '#fbf1e2' },
+  tuxedo: { F: '#4a4a58', D: '#3b3b48', G: '#e8c547' },   // 黑白賓士貓
+};
+const pals = {};
+const coatPal = k => pals[k] || (pals[k] = { ...C, ...(COATS[k] || {}) });
+let myCoat = 'gray', coatPicked = false;               // coatPicked：自己選過毛色（網頁版記在這個分頁裡，重新整理還在）
+try { const k = sessionStorage.getItem('yarncat-coat'); if (COATS[k]) { myCoat = k; coatPicked = true; } } catch (_) {}
+function nextCoat() {                                  // 換下一種毛色
+  const keys = Object.keys(COATS);
+  myCoat = keys[(keys.indexOf(myCoat) + 1) % keys.length];
+  coatPicked = true;
+  try { sessionStorage.setItem('yarncat-coat', myCoat); } catch (_) {}
+}
+
+const LINK_V = 1;                                      // 訊息格式的版本：兩邊不一樣就不當隔壁
+const ME = Math.random().toString(36).slice(2, 10);   // 這個視窗的代號
+let peer = null;                                       // 隔壁 { id, sx, q, hasGuest, seen, odd }：sx 視窗在螢幕上的 x、q 安靜模式、odd 對帳對不上幾次了
+let guest = null;                                      // 隔壁來作客的貓
+let linkT = 0;                                         // 連線用的時鐘（格）
+const link = TAURI || !window.BroadcastChannel ? null : new BroadcastChannel('yarncat');
+if (link) {
+  link.onmessage = e => onLink(e.data);
+  window.addEventListener('pagehide', () => say({ t: 'bye' }));
+}
+function say(m) { if (link) link.postMessage({ ...m, v: LINK_V, id: ME }); }
+// 隔壁在哪一邊：網頁版看兩個視窗誰左誰右，疊在一起就比代號（桌寵版之後改成系統匣設定）
+const peerSide = () => (peer.sx === window.screenX ? ME < peer.id : peer.sx > window.screenX) ? 1 : -1;
+// 去隔壁：隔壁在、沒開安靜模式、那邊沒有客人；自己家也沒有客人（有客人就在家陪），還有精神
+const canVisit = () => peer && !peer.q && !peer.hasGuest && !guest && cat.energy > 30;
+
+function goAway() {                                    // 整隻走出畫面了：告訴隔壁「我的貓過去了」
+  say({ t: 'visit', to: peer.id, coat: myCoat, energy: cat.energy });
+  setState('away', 18000);                             // 最多待 5 分鐘
+}
+function comeHome(energy) {                            // 從隔壁回來：從當初走出去的那一邊走進來
+  cat.x = cat.edge > 0 ? W + 16 : -16; cat.y = FLOOR; cat.dir = -cat.edge;
+  if (Number.isFinite(energy)) cat.energy = clamp(energy, 0, 100);
+  visitCD = rand(28800, 54000);                        // 下一次 8～15 分鐘後
+  setState('arrive', 600);
+}
+function callHome() {                                  // 隔壁不見了、待太久：叫牠回來（隔壁還在的話，請那邊讓客人先離開）
+  if (peer) say({ t: 'recall', to: peer.id });
+  comeHome();
+}
+function lostPeer() {                                  // 隔壁關掉了、5 秒沒消息：自己的貓回家，客人也回家
+  peer = null;
+  if (cat.state === 'away') comeHome();
+  if (guest && guest.state !== 'exit') guestSet('exit', 999);
+}
+function onLink(m) {                                   // 收到隔壁的訊息。之後區網連線也走這裡，所以每個欄位都要檢查
+  if (!m || m.v !== LINK_V || typeof m.id !== 'string' || m.id === ME || (m.to && m.to !== ME)) return;
+  if (m.t === 'bye') { if (peer && m.id === peer.id) lostPeer(); return; }
+  if (!peer) {                                         // 新的隔壁：第一次串門子 2～4 分鐘後
+    if (m.t !== 'hi') return;
+    peer = { id: m.id, odd: 0 };
+    visitCD = rand(7200, 14400);
+  }
+  if (m.id !== peer.id) return;                       // 已經有隔壁了，別的視窗不理
+  peer.seen = linkT;
+  const coat = COATS[m.coat] ? m.coat : 'gray';
+  if (m.t === 'hi') {
+    Object.assign(peer, { sx: Number(m.sx) || 0, q: !!m.q, hasGuest: !!m.guest });
+    if (guest && guest.from === m.id) guest.coat = coat;
+    if (!coatPicked && coat === myCoat && ME > m.id) nextCoat();   // 兩隻撞色就換一隻，比較好認
+    // 對帳：我以為貓在隔壁，隔壁卻說沒有；或我家有隔壁的貓，隔壁卻說牠在家（訊息掉了、重新整理過）。
+    // 交接的訊息可能還在路上，連續 3 次對不上才算數
+    const mine = cat.state === 'away' && m.guest !== ME, theirs = guest && guest.from === m.id && m.away !== ME;
+    peer.odd = mine || theirs ? peer.odd + 1 : 0;
+    if (peer.odd >= 3) {
+      peer.odd = 0;
+      if (mine) comeHome();
+      if (theirs) { poof(guest.x, guest.y - 8); guest = null; }
+    }
+  } else if (m.t === 'visit') {                       // 隔壁的貓過來了：從那一邊走進來，待 1～3 分鐘
+    if (guest) return;                                // 已經有客人了（對帳會讓隔壁把貓叫回去）
+    const edge = peerSide();
+    guest = { from: m.id, coat, energy: Number.isFinite(m.energy) ? clamp(m.energy, 0, 100) : 80, edge,
+      x: edge > 0 ? W + 16 : -16, y: FLOOR, dir: -edge, state: 'enter', t: 0, dur: 999, frame: 0, target: 0,
+      stay: rand(3600, 10800) };
+  } else if (m.t === 'home') {                        // 我的貓從隔壁走回來了
+    if (cat.state === 'away') comeHome(m.energy);
+  } else if (m.t === 'recall') {                      // 隔壁把牠的貓叫回去了：那邊已經讓牠從邊邊走進去，這邊的客人就不見了
+    if (guest && guest.from === m.id) { poof(guest.x, guest.y - 8); guest = null; }
+  }
+}
+function linkTick() {                                  // 每格：每秒打一次招呼，5 秒沒消息就當隔壁不在了
+  if (!link) return;
+  linkT++;
+  if (linkT % 60 === 0) say({ t: 'hi', coat: myCoat, sx: window.screenX, q: quiet,
+    away: cat.state === 'away' && peer ? peer.id : '', guest: guest ? guest.from : '' });
+  if (peer && linkT - peer.seen > 300) lostPeer();
+}
+
+/* 客人貓：沿用家裡的貓的姿勢，用牠自己的毛色畫。只會走進來、跟主人家的貓碰鼻子、坐坐、舔毛、走走、打盹，
+   待夠了就從原來那一邊走回去；可以摸，不能拎，不用家具。 */
+const GUEST_PETTABLE = ['sit', 'lick', 'walk', 'sleep', 'wait', 'pet'];
+function guestSet(s, dur = 60) { guest.state = s; guest.t = 0; guest.dur = dur; guest.frame = 0; }
+function guestIdle() {                                 // 客人閒著：待夠了（或主人不見了）就回家，不然坐坐、舔毛、走走、打個盹
+  const g = guest;
+  if (!g.stay || !peer) return guestSet('exit', 999);
+  if (quiet) return guestSet('sleep', 600);
+  const r = Math.random();
+  if (r < 0.35) return guestSet('sit', rand(150, 300));
+  if (r < 0.6) return guestSet('lick', rand(90, 150));
+  if (r < 0.85) { g.target = rand(20, W - 20); return guestSet('walk', 400); }
+  guestSet('sleep', rand(600, 1200));
+}
+// 主人家的貓能不能過來打招呼：在家、在地上、閒著
+const canMeet = () => !quiet && !cat.perch && !cat.in && cat.y >= FLOOR &&
+  ['sit', 'lick', 'rest', 'walk', 'stare', 'beg', 'drool', 'dream', 'loaf', 'flop'].includes(cat.state);
+function updateGuest() {
+  const g = guest;
+  if (!g) return;
+  g.t++;
+  if (g.t % RATE[g.state] === 0) g.frame++;
+  g.stay = Math.max(0, g.stay - 1);
+  switch (g.state) {
+    case 'enter': {                                    // 從隔壁那一邊走進來，停在離邊邊一小段的地方
+      const tx = g.edge > 0 ? W - 40 : 40;
+      g.x -= g.edge * 0.6;
+      if (g.edge > 0 ? g.x <= tx : g.x >= tx) {
+        g.x = tx;
+        if (canMeet()) { setState('meet', Math.abs(cat.x - g.x) / 0.8 + 120); guestSet('wait', cat.dur); }   // 主人家的貓走過來打招呼
+        else guestIdle();
+      }
+      break;
+    }
+    case 'wait':                                       // 等主人家的貓走過來
+      g.dir = Math.sign(cat.x - g.x) || g.dir;
+      if (cat.state !== 'meet' || g.t > g.dur) guestIdle();
+      break;
+    case 'walk':
+      g.dir = Math.sign(g.target - g.x) || g.dir;
+      g.x += g.dir * 0.35;
+      if (Math.abs(g.target - g.x) < 1 || g.t > g.dur) guestIdle();
+      break;
+    case 'exit':                                       // 回家：走出畫面，告訴隔壁牠回去了
+      g.dir = g.edge;
+      g.x += g.edge * 0.6;
+      if (g.x > W + 16 || g.x < -16) { say({ t: 'home', to: g.from, energy: g.energy }); guest = null; }
+      break;
+    case 'pet':                                        // 被摸：瞇眼呼嚕，冒愛心
+      if (g.t % 30 === 1) puff('heart', g.x + g.dir * rand(0, 6), g.y - 22);
+      if (g.t > g.dur) guestIdle();
+      break;
+    default:                                           // sit、lick、sleep、boop：時間到了換下一件事
+      if (g.t > g.dur) guestIdle();
+  }
+  if (g.state !== 'enter' && g.state !== 'exit') g.x = clamp(g.x, 12, W - 12);
+}
+function guestPose(g) {
+  const f = g.frame;
+  switch (g.state) {
+    case 'enter': case 'exit': case 'walk': return standPose(f);
+    case 'lick': return lickPose(f);
+    case 'sleep': return sleepPose(f);
+    case 'pet': return sitPose(f, 'pet');
+    case 'boop': return eatPose(f, true);
+    case 'wait': return sitPose(f, 'stare');
+    default: return sitPose(f, 'sit');
+  }
+}
+function guestBox() {                                  // 客人在哪裡點得到（坐著時照牠面向哪邊左右翻）
+  const { x, y, state, dir } = guest;
+  if (state === 'sleep') return { x0: x - 12, y0: y - 14, x1: x + 12, y1: y + 1 };
+  if (['sit', 'lick', 'pet', 'wait'].includes(state)) return { x0: x - (dir > 0 ? 14 : 11), y0: y - 23, x1: x + (dir > 0 ? 11 : 14), y1: y + 1 };
+  return { x0: x - 19, y0: y - 18, x1: x + 19, y1: y + 1 };
+}
+function drawGuest() {
+  const g = guest, [parts, det] = guestPose(g), ox = Math.round(g.x), oy = Math.round(g.y);
+  drawRects(ox, oy, parts, det, g.dir, coatPal(g.coat));
+  if (g.state === 'sleep') drawZ(ox + g.dir * 8, oy - 14, g.t);
+}
+function petGuest() {                                  // 摸客人、點一下客人：瞇眼呼嚕
+  if (GUEST_PETTABLE.includes(guest.state) && guest.state !== 'pet') guestSet('pet', 180);
+  rub.flips = 0;
+}
+
 /* ═══ 遊戲迴圈：固定每秒 60 次更新，畫面跟著螢幕刷新 ═══ */
 let acc = 0, lastT = performance.now();
 function frame(now) {
@@ -1969,6 +2210,8 @@ function frame(now) {
     else if (toy === 'laser') updateLaser();
     else updateWand();
     updateCat();
+    updateGuest();
+    linkTick();
     updateFurniture();
     updateFx();
     acc -= 1000 / 60;
@@ -1981,6 +2224,7 @@ function frame(now) {
   if (toy === 'ball') { drawRope(); drawBall(); }
   if (snack) drawSnack(Math.round(snack.x) - 3, Math.round(snack.y), snack.bites);
   if (treat && !treat.held) drawTreat();
+  if (guest) drawGuest();                              // 客人畫在家裡的貓後面
   if (cat.state === 'hide') drawPeek(); else drawCat();
   if (litter.on && cat.in === 'litter') drawLitter(true);
   if (box.on && cat.in === 'box') drawBox(true);
