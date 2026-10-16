@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  商店版（MSIX）的套件資訊。build.ps1 照這份產生正式的 AppxManifest.xml，
+  Version 和 Executable 由它填進去，這裡寫什麼都會被蓋掉。
+
+  Identity 的 Name、Publisher 和 PublisherDisplayName 是 Partner Center「Product identity」頁上的值，
+  商店指定的，一字不差、不能改（見 README.md）。
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+
+  <!-- Partner Center 的 Package/Identity/Name、Package/Identity/Publisher -->
+  <Identity
+    Name="chyhhwen.Yarncat"
+    Publisher="CN=1CDB851D-7C5B-40D8-A4A8-C50B94E1F7A2"
+    Version="0.0.0.0"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <!-- 要跟 Partner Center 保留的名稱一樣；下面 VisualElements 的 DisplayName 也改成一樣 -->
+    <DisplayName>毛球貓</DisplayName>
+    <!-- Partner Center 的 Package/Properties/PublisherDisplayName -->
+    <PublisherDisplayName>chyhhwen</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <!-- Windows 10 1809 以上 -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="zh-TW" />
+  </Resources>
+
+  <Applications>
+    <Application Id="YarnCat" Executable="yarncat.exe" EntryPoint="Windows.FullTrustApplication">
+      <!-- 圖示由 build.ps1 從 icons/icon.png 產生 -->
+      <uap:VisualElements
+        DisplayName="毛球貓"
+        Description="在螢幕底部玩毛球的桌寵"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <!-- 一般桌面程式（不是 UWP）都要宣告這個；送審時要填理由，見 README.md -->
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+</Package>

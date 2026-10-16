@@ -58,6 +58,22 @@ jobs:
           releaseDraft: true
           args: ${{ matrix.args }}
 
+      # 商店版：把上一步編好的 exe 包成 MSIX（說明見 src-tauri/msix/README.md）。
+      # 用 Windows PowerShell 跑，跟在自己電腦上測的是同一套
+      - name: 打包 MSIX
+        if: matrix.platform == 'windows-latest'
+        shell: powershell
+        run: ./src-tauri/msix/build.ps1
+
+      # 送審用的 .msix 和測試用的資料夾放在這次執行的頁面最下面「Artifacts」的 msix。
+      # 不放進 Release：沒有簽章的 .msix，一般人點兩下也裝不起來
+      - uses: actions/upload-artifact@v4
+        if: matrix.platform == 'windows-latest'
+        with:
+          name: msix
+          path: src-tauri/target/msix/
+          if-no-files-found: error
+
       # 沒有 Mac 可以測，所以在這台 macOS 機器上直接執行 app、拍一張螢幕截圖。
       # 直接跑執行檔（不用 open），閃退時才看得到它印出的錯誤。
       - name: macOS 試跑並截圖
