@@ -2,6 +2,8 @@
 
 把 `tauri build` 編好的 exe 包成 MSIX，上架 Microsoft Store。商店審核通過後會幫 MSIX 簽章，從商店安裝的人不會被 SmartScreen、智慧型應用程式控制擋下來。
 
+已上架：[Microsoft Store 的毛球貓頁面](https://apps.microsoft.com/detail/9nrj7lgz2jkd?hl=zh-TW&gl=TW)
+
 | 檔案 | 做什麼 |
 | --- | --- |
 | `AppxManifest.xml` | 套件資訊：名稱、發行者、權限、圖示。版本號和 exe 檔名由 `build.ps1` 填 |
