@@ -74,10 +74,10 @@ powershell -ExecutionPolicy Bypass -File src-tauri\msix\build.ps1
 Win32 desktop pet (Tauri + WebView2) packaged as MSIX, not UWP. Full trust is needed for its transparent, always-on-top, click-through window above the taskbar, its tray menu, reading the cursor position so the cat can chase toys, and reading images from Pictures\YarnCat.
 ```
 
-**Notes for certification**（貼在「Additional Testing Information」頁。毛球貓沒有視窗，要告訴審核人員去哪裡找）：
+**Notes for certification**（貼在「Additional Testing Information」頁。毛球貓沒有一般的視窗，要告訴審核人員去哪裡找）：
 
 ```
-YarnCat has no regular window or taskbar button. After launch, a pixel cat appears at the bottom of the primary screen, just above the taskbar. All options (toys, furniture, quiet mode, quit) are in the cat icon in the system tray; on Windows 11 it may be hidden under the ^ overflow. Drag the cat or the yarn ball with the mouse to play. The app makes no network connections.
+YarnCat has no regular window or taskbar button. After launch, a pixel cat appears at the bottom of the primary screen, just above the taskbar. Left-click the cat icon in the system tray to open a small status window (coat, furniture, screen, quit); right-click it for toys, treats, quiet mode and quit. On Windows 11 the icon may be hidden under the ^ overflow. Drag the cat or the yarn ball with the mouse to play. The app makes no network connections.
 ```
 
 **隱私權政策**（Partner Center 規定一定要有，這次選「Provide privacy policy text」直接貼文字。這份只存在 Partner Center，要改的時候這裡也一起改。做好串門子之後「不會連上網路」就不成立了，要改寫）：

@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>毛球貓</title>
+<style>
+  /* 狀態視窗：左鍵點系統匣圖示打開（main.rs 的 toggle_status_window），點到別的地方就收起來。
+     毛球貓不連網：字型只用系統內建的，不載入網路字型 */
+  :root {
+    --ink: #262530; --sub: #5c6577; --sub2: #4a5263; --line: rgba(38, 37, 48, 0.1); --edge: rgba(38, 37, 48, 0.22);
+    --accent: #2f7a6c; --bg: #f7f8fa; --well: #e7ebf0; --floor: #d9dee5; --floor-edge: #c3cad4;
+    --empty: #dde2e8; --ok: #4d8a2e; --low: #b8432c; --warn: #9a3a26; --poo: #8b5a2f; --off: #bfc6cf;
+  }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 "Microsoft JhengHei UI", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
+    user-select: none; -webkit-user-select: none; cursor: default;
+  }
+  [hidden] { display: none !important; }               /* 下面有些元素自己設了 display，不加這行 hidden 會沒效 */
+  button { font: inherit; color: inherit; cursor: pointer; }
+  img { image-rendering: pixelated; }
+  .num { font-family: ui-monospace, Consolas, "SF Mono", Menlo, monospace; }
+  small { display: block; font-size: 12px; color: var(--sub); }
+
+  header { display: flex; align-items: center; gap: 6px; height: 40px; flex: none; padding: 0 4px 0 14px; border-bottom: 1px solid var(--line); }
+  header b { font-size: 13px; }
+  #tab-name { font-size: 13px; color: var(--sub); }
+  #close { margin-left: auto; display: flex; align-items: center; justify-content: center; width: 40px; height: 32px; border: 0; border-radius: 6px; background: transparent; color: var(--sub); }
+  #close:hover { background: var(--well); }
+
+  .body { display: flex; flex: 1; min-height: 0; }
+  nav { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 56px; flex: none; padding: 10px 0; box-sizing: border-box; border-right: 1px solid rgba(38, 37, 48, 0.08); }
+  nav button { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; background: transparent; }
+  nav span { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--edge); background: #fff; color: var(--ink); }
+  nav button:hover span { border-color: var(--accent); }
+  nav button[aria-pressed="true"] span { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  main { flex: 1; min-width: 0; padding: 16px; box-sizing: border-box; overflow: hidden; }
+  section { display: flex; flex-direction: column; gap: 12px; height: 100%; }
+  section[hidden] { display: none; }
+  h2 { margin: 0; font-size: 16px; line-height: 22px; }
+  .hint { margin: -10px 0 0; font-size: 12px; color: var(--sub); }
+
+  /* 狀態 */
+  .who { display: flex; gap: 12px; align-items: center; }
+  .portrait { position: relative; width: 108px; height: 104px; flex: none; border-radius: 8px; background: var(--well); overflow: hidden; }
+  .portrait::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 12px; background: var(--floor); border-top: 2px solid var(--floor-edge); }
+  #picture { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 1; }
+  #away { position: absolute; inset: 0 0 14px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--sub); }
+  .who h2 { font-size: 18px; line-height: 24px; }
+  #doing { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 999px; background: var(--well); font-size: 12px; color: var(--sub2); }
+  .stat { display: flex; flex-direction: column; gap: 5px; }
+  .stat-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--sub2); }
+  .stat-head .num { font-weight: 400; color: var(--ink); }
+  .bar { display: flex; gap: 2px; }
+  .bar i { flex: 1; height: 10px; border-radius: 2px; background: var(--empty); }
+  .bar i.on { background: var(--ok); }
+  .bar i.low { background: var(--low); }
+  .warn { font-size: 12px; color: var(--warn); }
+  .litter { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--sub2); }
+  .slots { display: flex; gap: 3px; }
+  .slots i { width: 22px; height: 10px; border-radius: 2px; background: var(--empty); }
+  .slots i.on { background: var(--poo); }
+  .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: auto 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+  .facts dt { font-size: 11px; color: var(--sub); }
+  .facts dd { margin: 0; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* 毛色 */
+  .coats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .coat { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; min-height: 112px; padding: 8px 2px 10px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; }
+  .coat:hover { border-color: var(--accent); }
+  .coat span { font-size: 13px; font-weight: 700; }
+  .coat[aria-pressed="true"] { border: 2px solid var(--accent); padding: 7px 1px 9px; }
+  .coat[aria-pressed="true"]::after {
+    content: ""; position: absolute; top: 5px; right: 5px; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17 19 7'/%3E%3C/svg%3E") center / 12px no-repeat;
+  }
+
+  /* 家具 */
+  .rows { display: flex; flex-direction: column; }
+  .row { display: flex; align-items: center; gap: 8px; min-height: 52px; border-bottom: 1px solid rgba(38, 37, 48, 0.08); }
+  .row:last-child { border-bottom: 0; }
+  .row div { flex: 1; min-width: 0; }
+  .switch { position: relative; width: 52px; height: 44px; flex: none; padding: 0; border: 0; background: transparent; }
+  .switch::before { content: ""; position: absolute; left: 4px; top: 9px; width: 44px; height: 26px; border-radius: 13px; background: var(--off); transition: background 0.15s; }
+  .switch::after { content: ""; position: absolute; left: 7px; top: 12px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: left 0.15s; }
+  .switch[aria-pressed="true"]::before { background: var(--accent); }
+  .switch[aria-pressed="true"]::after { left: 25px; }
+
+  /* 螢幕 */
+  .screens { display: flex; flex-direction: column; gap: 6px; }
+  .screen { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 12px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; text-align: left; }
+  .screen:hover { border-color: var(--accent); }
+  .screen::before { content: ""; width: 18px; height: 18px; flex: none; box-sizing: border-box; border-radius: 50%; border: 2px solid #8a93a1; }
+  .screen[aria-pressed="true"] { border-color: var(--accent); }
+  .screen[aria-pressed="true"]::before { border-color: var(--accent); background: radial-gradient(circle, var(--accent) 0 4px, transparent 4.5px); }
+
+  /* 系統 */
+  .action { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 12px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; text-align: left; }
+  .action:hover { border-color: var(--accent); }
+  .action svg { flex: none; }
+  #version { margin-top: auto; font-size: 11px; color: var(--sub); }
+</style>
+</head>
+<body>
+<header>
+  <b>毛球貓</b><span id="tab-name">· 狀態</span>
+  <button id="close" type="button" aria-label="關閉">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+  </button>
+</header>
+<div class="body">
+  <nav aria-label="分頁">
+    <button type="button" data-tab="status" aria-label="狀態" title="狀態" aria-pressed="true"><span>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="15.6" rx="4.6" ry="3.8"/><circle cx="6.4" cy="10.2" r="1.8"/><circle cx="9.8" cy="6.8" r="1.8"/><circle cx="14.2" cy="6.8" r="1.8"/><circle cx="17.6" cy="10.2" r="1.8"/></svg>
+    </span></button>
+    <button type="button" data-tab="coat" aria-label="毛色" title="毛色" aria-pressed="false"><span>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a4.8 4.8 0 0 0 4.8-4.8c0-3.9-3.9-7-8.8-7z"/><circle cx="7.6" cy="11.2" r="1"/><circle cx="9.6" cy="7.4" r="1"/><circle cx="14" cy="7" r="1"/><circle cx="17" cy="10" r="1"/></svg>
+    </span></button>
+    <button type="button" data-tab="furn" aria-label="家具" title="家具" aria-pressed="false"><span>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5"/><path d="M12 12v9"/></svg>
+    </span></button>
+    <button type="button" data-tab="screen" aria-label="螢幕" title="螢幕" aria-pressed="false"><span>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>
+    </span></button>
+    <button type="button" data-tab="system" aria-label="系統" title="系統" aria-pressed="false"><span>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+    </span></button>
+  </nav>
+  <main>
+    <section id="tab-status">
+      <div class="who">
+        <div class="portrait">
+          <img id="picture" alt="毛球貓現在的樣子" hidden>
+          <span id="away" hidden>不在家</span>
+        </div>
+        <div>
+          <h2>毛球貓</h2>
+          <span id="doing">…</span>
+        </div>
+      </div>
+      <div class="stat">
+        <div class="stat-head"><span>體力</span><span class="num" id="energy-num"></span></div>
+        <div class="bar" id="energy-bar"></div>
+        <span class="warn" id="energy-low" hidden>快沒體力了，等一下會去睡</span>
+      </div>
+      <div class="stat">
+        <div class="stat-head"><span>貓砂盆</span><span class="num" id="poop-num"></span></div>
+        <div class="litter"><div class="slots" id="poop-slots"></div><span id="poop-note"></span></div>
+      </div>
+      <dl class="facts">
+        <div><dt>毛色</dt><dd id="fact-coat">–</dd></div>
+        <div><dt>玩具</dt><dd id="fact-toy">–</dd></div>
+        <div><dt>螢幕</dt><dd id="fact-screen">–</dd></div>
+      </dl>
+    </section>
+
+    <section id="tab-coat" hidden>
+      <h2>毛色</h2>
+      <p class="hint">選好會記住，重開也一樣。</p>
+      <div class="coats" id="coats"></div>
+    </section>
+
+    <section id="tab-furn" hidden>
+      <h2>家具</h2>
+      <p class="hint">收起來的會記住。</p>
+      <div class="rows">
+        <div class="row"><div><b>貓砂盆</b><small>會自己去上廁所</small></div><button type="button" class="switch" data-furn="litter" aria-label="貓砂盆" aria-pressed="true"></button></div>
+        <div class="row"><div><b>貓跳台</b><small>磨爪、跳上去睡覺</small></div><button type="button" class="switch" data-furn="tree" aria-label="貓跳台" aria-pressed="true"></button></div>
+        <div class="row"><div><b>紙箱</b><small>躲進去嚇你</small></div><button type="button" class="switch" data-furn="box" aria-label="紙箱" aria-pressed="true"></button></div>
+      </div>
+    </section>
+
+    <section id="tab-screen" hidden>
+      <h2>螢幕</h2>
+      <p class="hint">貓待在哪個螢幕上。選好會記住。</p>
+      <div class="screens" id="screens"></div>
+    </section>
+
+    <section id="tab-system" hidden>
+      <h2>系統</h2>
+      <button type="button" class="action" id="open-pictures">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
+        <span><b>打開泡泡圖片資料夾</b><small id="pictures-path">圖片\YarnCat</small></span>
+      </button>
+      <button type="button" class="action" id="quit">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg>
+        <b>結束毛球貓</b>
+      </button>
+      <span id="version"></span>
+    </section>
+  </main>
+</div>
+<script>
+/* 資料從哪來：
+   - 設定（毛色、家具、螢幕）：Rust 的 get_settings；改了會收到 settings 事件
+   - 貓現在的樣子：貓的視窗（index.html）在這個視窗開著時每半秒送一次 cat-status
+   - 毛色選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards 過來 */
+const TAURI = window.__TAURI__;
+const $ = id => document.getElementById(id);
+const TABS = { status: '狀態', coat: '毛色', furn: '家具', screen: '螢幕', system: '系統' };
+const SCALE = 3;                                       // 貓的小圖放大幾倍（跟桌面上一樣大；最寬的飛撲 35 格 × 3 剛好塞得進框）
+let settings = { coat: null, furniture: { litter: true, tree: true, box: true }, screen: null };
+let catCoat = 'gray';                                  // 貓現在的毛色（沒選過時是預設的藍灰）
+let coats = [];                                        // 毛色選單：[{ id, name, picture }]
+let screens = [];                                      // [{ key, label, chosen }]
+
+// 用瀏覽器直接打開這個檔案時（不在桌寵裡）用假資料，方便調版面
+const call = (cmd, args) => TAURI ? TAURI.core.invoke(cmd, args) : Promise.resolve(fake(cmd, args));
+
+/* ─── 分頁 ─── */
+function showTab(tab) {
+  for (const b of document.querySelectorAll('nav button')) b.setAttribute('aria-pressed', String(b.dataset.tab === tab));
+  for (const k of Object.keys(TABS)) $('tab-' + k).hidden = k !== tab;
+  $('tab-name').textContent = '· ' + TABS[tab];
+  if (tab === 'screen') loadScreens();                 // 剛接上的螢幕也列得出來
+}
+for (const b of document.querySelectorAll('nav button')) b.addEventListener('click', () => showTab(b.dataset.tab));
+
+const hide = () => call('hide_status');
+$('close').addEventListener('click', hide);
+window.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
+
+/* ─── 狀態 ─── */
+const SEGS = 20;
+for (let i = 0; i < SEGS; i++) $('energy-bar').appendChild(document.createElement('i'));
+let lastPicture = null;
+function setPicture(src) {
+  const img = $('picture');
+  img.hidden = !src;
+  $('away').hidden = !!src;                            // 去隔壁作客時家裡沒有貓
+  if (!src || src === lastPicture) return;
+  lastPicture = src;
+  img.onload = () => { img.width = img.naturalWidth * SCALE; img.height = img.naturalHeight * SCALE; };
+  img.src = src;
+}
+function renderStatus(s) {
+  $('doing').textContent = s.doing;
+  setPicture(s.picture);
+  const energy = Math.max(0, Math.min(100, s.energy));
+  const filled = Math.round(energy * SEGS / 100), low = energy < 20;   // 體力低於 20 貓就會去睡
+  [...$('energy-bar').children].forEach((seg, i) => { seg.className = i < filled ? (low ? 'low' : 'on') : ''; });
+  $('energy-num').textContent = `${energy} / 100`;
+  $('energy-low').hidden = !low;
+  const slots = $('poop-slots');
+  if (s.poop === null) {                               // 貓砂盆收起來了
+    slots.replaceChildren();
+    $('poop-num').textContent = '';
+    $('poop-note').textContent = '收起來了';
+  } else {
+    if (slots.children.length !== s.dirty) slots.replaceChildren(...Array.from({ length: s.dirty }, () => document.createElement('i')));
+    [...slots.children].forEach((x, i) => { x.className = i < s.poop ? 'on' : ''; });
+    $('poop-num').textContent = `${s.poop} / ${s.dirty}`;
+    const left = s.dirty - s.poop;                     // 滿 dirty 坨就嫌髒、不肯進去
+    $('poop-note').textContent = left <= 0 ? '太髒了，牠不肯進去' : s.poop === 0 ? '乾淨' : `再 ${left} 坨就不肯進去`;
+  }
+  $('fact-coat').textContent = s.coatName;
+  $('fact-toy').textContent = s.toy;
+  if (s.coat !== catCoat) { catCoat = s.coat; renderCoats(); }
+}
+
+/* ─── 毛色 ─── */
+function renderCoats() {
+  const chosen = settings.coat || catCoat;
+  $('coats').replaceChildren(...coats.map(c => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'coat';
+    b.setAttribute('aria-pressed', String(c.id === chosen));
+    if (c.picture) {
+      const img = new Image();
+      img.alt = '';
+      img.onload = () => { img.width = img.naturalWidth * SCALE; img.height = img.naturalHeight * SCALE; };
+      img.src = c.picture;
+      b.append(img);
+    }
+    const name = document.createElement('span');
+    name.textContent = c.name;
+    b.append(name);
+    b.addEventListener('click', () => call('set_coat', { coat: c.id }));
+    return b;
+  }));
+}
+
+/* ─── 家具 ─── */
+for (const b of document.querySelectorAll('[data-furn]')) {
+  b.addEventListener('click', () => call('set_furniture', { name: b.dataset.furn, on: settings.furniture[b.dataset.furn] === false }));
+}
+
+/* ─── 螢幕 ─── */
+function loadScreens() {
+  call('list_screens').then(list => { screens = list || []; renderScreens(); }).catch(() => {});
+}
+function renderScreens() {
+  $('screens').replaceChildren(...screens.map(s => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'screen';
+    b.setAttribute('aria-pressed', String(s.chosen));
+    b.append(s.label);
+    b.addEventListener('click', () => call('set_screen', { key: s.key }).then(loadScreens).catch(() => {}));
+    return b;
+  }));
+  const chosen = screens.find(s => s.chosen);
+  $('fact-screen').textContent = chosen ? chosen.label.split('：')[0] : '–';
+}
+
+/* ─── 系統 ─── */
+if (/Mac/.test(navigator.platform)) $('pictures-path').textContent = '~/Pictures/YarnCat';
+$('open-pictures').addEventListener('click', () => call('open_picture_folder'));
+$('quit').addEventListener('click', () => call('quit_app'));
+if (TAURI && TAURI.app) TAURI.app.getVersion().then(v => { $('version').textContent = '版本 ' + v; }).catch(() => {});
+
+/* ─── 設定 ─── */
+function renderSettings() {
+  for (const b of document.querySelectorAll('[data-furn]')) b.setAttribute('aria-pressed', String(settings.furniture[b.dataset.furn] !== false));
+  renderCoats();
+}
+function loadSettings() {
+  call('get_settings').then(s => { if (s) { settings = s; renderSettings(); } }).catch(() => {});
+}
+
+if (TAURI) {
+  const on = (name, fn) => TAURI.event.listen(name, ({ payload }) => fn(payload));
+  Promise.all([
+    on('cat-status', renderStatus),
+    on('coat-cards', list => { coats = list || []; renderCoats(); }),
+    on('settings', s => { settings = s; renderSettings(); loadScreens(); }),
+    on('status-shown', () => { showTab('status'); loadSettings(); loadScreens(); }),   // 每次打開都從「狀態」開始
+  ]).then(() => TAURI.event.emitTo('main', 'status-ready'));   // 請貓的視窗把小圖、現在的狀態送過來
+} else {
+  coats = [{ id: 'gray', name: '藍灰虎斑' }, { id: 'orange', name: '橘貓' }, { id: 'tuxedo', name: '黑白賓士' }];
+  renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', toy: '毛球', picture: null });
+}
+loadSettings();
+loadScreens();
+
+function fake(cmd, args) {                             // 瀏覽器版的假 Rust
+  switch (cmd) {
+    case 'get_settings': return settings;
+    case 'list_screens': return screens.length ? screens : [
+      { key: 'a', label: '螢幕 1：1920×1080（主螢幕）', chosen: true },
+      { key: 'b', label: '螢幕 2：2560×1440', chosen: false },
+    ];
+    case 'set_coat': settings.coat = args.coat; renderSettings(); return;
+    case 'set_furniture': settings.furniture[args.name] = args.on; renderSettings(); return;
+    case 'set_screen': screens = screens.map(s => ({ ...s, chosen: s.key === args.key })); return;
+  }
+}
+</script>
+</body>
+</html>

@@ -314,8 +314,16 @@ function treatTip() {                                  // 擠得出來的那一�
 const MOUTH = [[13, -5], [7, -15], [7, -20]];          // 舔貓條時嘴巴在哪（相對貓的腳底正中間，面向右）：低頭、坐著、站起來
 
 /* ═══ 貓的大腦：狀態機 ═══ */
+// 貓在做什麼（狀態視窗顯示用；盯著、追、撥的是哪個玩具，見 doing()）
 const ZH = { sit: '坐著', lick: '舔毛', stare: '盯著毛球', walk: '散步', chase: '追毛球',
-  crouch: '壓低準備撲', pounce: '飛撲', swipe: '用前掌撥', sleep: '睡覺', held: '被拎起來', fall: '掉下來' };
+  crouch: '壓低準備撲', pounce: '飛撲', swipe: '用前掌撥', sleep: '睡覺', held: '被拎起來', fall: '掉下來',
+  hunt: '追毛球', aim: '壓低準備跳', leap: '跳起來撲', clutch: '抓住羽毛吊著', slap: '跳起來拍', loaf: '趴成一條麵包', flop: '翻肚躺著',
+  beg: '討摸', drool: '想吃零食', dream: '望著泡泡發呆', pet: '被摸，呼嚕呼嚕', fetch: '去拿零食', eat: '吃零食',
+  rest: '趴著休息', hop: '跳', zoom: '暴衝', treat: '舔貓條',
+  toLitter: '要去上廁所', squat: '上廁所', cover: '扒砂蓋便便', sniffGo: '去聞便便', sniff: '聞便便', stink: '被臭到', bury: '對著地板扒',
+  toBox: '溜進紙箱', hide: '躲在紙箱裡', boo: '蹦出來嚇你', spook: '嚇到炸毛',
+  toTree: '走去貓跳台', scratch: '磨爪', toPom: '跑去撥小毛球', pom: '撥小毛球',
+  leave: '出門去隔壁', away: '在隔壁作客', arrive: '回家了', meet: '跟客人打招呼', boop: '跟客人碰鼻子' };
 const RATE = { sit: 20, lick: 9, stare: 30, walk: 9, chase: 5, crouch: 6, pounce: 99,
   swipe: 14, sleep: 40, held: 10, fall: 10,
   hunt: 5, aim: 6, leap: 99, clutch: 12, slap: 14, loaf: 12, flop: 18,
@@ -1328,12 +1336,13 @@ function currentPose() {
 }
 
 // 畫一組長方形：parts 先統一描黑邊再填色，det 不描邊；dir < 0 左右翻過來；pal：顏色表（換毛色時用 coatPal 給的）
-function drawRects(ox, oy, parts, det, dir = 1, pal = C) {
+// g：畫在哪張 canvas（狀態視窗的小圖畫在另一張，見 catPicture）
+function drawRects(ox, oy, parts, det, dir = 1, pal = C, g = ctx) {
   const X = (x, w) => dir > 0 ? ox + x : ox - x - w;
-  ctx.fillStyle = pal.O;
-  for (const [x, y, w, h] of parts) ctx.fillRect(X(x - 1, w + 2), oy + y - 1, w + 2, h + 2);
-  for (const [x, y, w, h, c] of parts) { ctx.fillStyle = pal[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
-  for (const [x, y, w, h, c] of det)   { ctx.fillStyle = pal[c]; ctx.fillRect(X(x, w), oy + y, w, h); }
+  g.fillStyle = pal.O;
+  for (const [x, y, w, h] of parts) g.fillRect(X(x - 1, w + 2), oy + y - 1, w + 2, h + 2);
+  for (const [x, y, w, h, c] of parts) { g.fillStyle = pal[c]; g.fillRect(X(x, w), oy + y, w, h); }
+  for (const [x, y, w, h, c] of det)   { g.fillStyle = pal[c]; g.fillRect(X(x, w), oy + y, w, h); }
 }
 function drawCat() {
   if (cat.state === 'away') return;                    // 在隔壁作客
@@ -1836,8 +1845,7 @@ if (TAURI) {
   });
   TAURI.event.listen('quiet', ({ payload }) => setQuiet(!!payload));
   TAURI.event.listen('toy', ({ payload }) => setToy(payload));
-  TAURI.event.listen('furniture', ({ payload }) => setFurniture(payload[0], payload[1]));   // payload：[哪一件, 擺出來嗎]
-  TAURI.event.listen('treat', () => giveTreat());
+  TAURI.event.listen('treat', () => giveTreat());      // 家具、毛色從狀態視窗改，見「狀態視窗」
 } else {
   document.body.classList.add('browser');
   // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒；4 討摸泡泡、5 想吃零食的泡泡、6 大泡泡（要先拖圖片進來）；
@@ -1993,7 +2001,7 @@ function setQuiet(on) {                                // 系統匣的「安靜�
   }
 }
 
-function setFurniture(name, on) {                      // 系統匣的「家具」：擺出來或收起來
+function setFurniture(name, on) {                      // 狀態視窗的「家具」：擺出來或收起來
   const f = FURN[name];
   if (!f || f.on === on) return;
   f.on = on;
@@ -2199,6 +2207,61 @@ function drawGuest() {
 function petGuest() {                                  // 摸客人、點一下客人：瞇眼呼嚕
   if (GUEST_PETTABLE.includes(guest.state) && guest.state !== 'pet') guestSet('pet', 180);
   rub.flips = 0;
+}
+
+/* ═══ 狀態視窗（桌寵版）：左鍵點系統匣圖示打開，看貓在做什麼、換毛色、收放家具、選螢幕 ═══
+   畫面在 status.html。設定由 Rust 存在 settings.json（毛色、家具、螢幕會記住；玩具、安靜模式不記），
+   這裡只照著擺。狀態視窗開著的時候，每半秒把貓現在的樣子送過去：在做什麼、體力、貓砂盆、照現在姿勢畫的小圖。 */
+const COAT_NAMES = { gray: '藍灰虎斑', orange: '橘貓', tuxedo: '黑白賓士' };
+const TOY_NAMES = { ball: '毛球', laser: '雷射光', wand: '逗貓棒' };
+function applySettings(s) {                            // 開機時讀一次；之後狀態視窗改了設定，Rust 會再送一次
+  if (!s) return;
+  if (COATS[s.coat]) { myCoat = s.coat; coatPicked = true; }
+  const f = s.furniture || {};
+  for (const k of Object.keys(FURN)) if (typeof f[k] === 'boolean') setFurniture(k, f[k]);
+}
+function doing() {                                     // 貓現在在做什麼
+  const prey = { ball: '毛球', laser: '紅點', wand: '羽毛' }[toy];
+  const s = cat.state;
+  let text = { stare: `盯著${prey}`, chase: `追${prey}`, hunt: `追${prey}`, swipe: `用前掌撥${prey}`, slap: `跳起來拍${prey}` }[s] || ZH[s] || '閒著';
+  if (s === 'sleep' && quiet) text = '睡覺（安靜模式）';
+  else if (cat.perch && ['sit', 'lick', 'sleep', 'loaf', 'rest'].includes(s)) text = '在貓跳台上' + text;
+  return text;
+}
+function catPicture(coat = myCoat, pose = currentPose()) {   // 照姿勢畫一張貓的小圖（不含家具、毛球），回傳 data URL
+  const [parts, det] = pose;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y, w, h] of parts) { x0 = Math.min(x0, x - 1); y0 = Math.min(y0, y - 1); x1 = Math.max(x1, x + w + 1); y1 = Math.max(y1, y + h + 1); }
+  for (const [x, y, w, h] of det)   { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
+  const c = document.createElement('canvas');
+  c.width = x1 - x0; c.height = y1 - y0;
+  drawRects(-x0, -y0, parts, det, 1, coatPal(coat), c.getContext('2d'));
+  return c.toDataURL();
+}
+function catStatus() {                                 // 狀態視窗要顯示的東西
+  const away = cat.state === 'away';
+  return {
+    doing: doing(), energy: Math.round(cat.energy),
+    poop: litter.on ? litter.poop.length : null, dirty: DIRTY,   // 貓砂盆收起來了就是 null
+    coat: myCoat, coatName: COAT_NAMES[myCoat] || myCoat, toy: TOY_NAMES[toy],
+    picture: away ? null : catPicture(),               // 去隔壁作客時家裡沒有貓
+  };
+}
+const coatCards = () => Object.keys(COATS).map(k => ({ id: k, name: COAT_NAMES[k] || k, picture: catPicture(k, sitPose(0, 'sit')) }));
+if (TAURI) {
+  let statusTimer = 0;
+  const sendStatus = () => TAURI.event.emitTo('status', 'cat-status', catStatus()).catch(() => {});
+  TAURI.event.listen('settings', ({ payload }) => applySettings(payload));
+  TAURI.event.listen('status-ready', () => {           // 狀態視窗剛載入好：送毛色選單的小圖、現在的狀態過去
+    TAURI.event.emitTo('status', 'coat-cards', coatCards()).catch(() => {});
+    sendStatus();
+  });
+  TAURI.event.listen('status-visible', ({ payload }) => {   // Rust 打開、收起狀態視窗時通知：開著才送
+    clearInterval(statusTimer);
+    statusTimer = payload ? setInterval(sendStatus, 500) : 0;
+    if (payload) sendStatus();
+  });
+  TAURI.core.invoke('get_settings').then(applySettings).catch(() => {});
 }
 
 /* ═══ 遊戲迴圈：固定每秒 60 次更新，畫面跟著螢幕刷新 ═══ */
