@@ -19,7 +19,7 @@ use tauri::{
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::Monitor,
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Rect, WebviewUrl,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
@@ -572,8 +572,9 @@ fn hide_status_window(app: &AppHandle) {
     let _ = app.emit_to("main", "status-visible", false);
 }
 
-/// 左鍵點系統匣圖示：開著就關、關著就開（rect 是圖示的位置）
-fn toggle_status_window(app: &AppHandle, rect: Rect) {
+/// 左鍵點系統匣圖示：開著就關、關著就開（rect 是圖示的位置）。
+/// 圖示的位置用 tauri::Rect 寫全名：上面長條用的 Rect 是另一個同名的 (x, y, 寬, 高)
+fn toggle_status_window(app: &AppHandle, rect: tauri::Rect) {
     let just_hidden = STATUS_HIDDEN_AT
         .lock()
         .ok()
@@ -590,7 +591,7 @@ fn toggle_status_window(app: &AppHandle, rect: Rect) {
 }
 
 /// 打開狀態視窗；從選單打開時沒有圖示位置，擺在游標旁邊
-fn show_status_window(app: &AppHandle, anchor: Option<Rect>) {
+fn show_status_window(app: &AppHandle, anchor: Option<tauri::Rect>) {
     let win = match app.get_webview_window("status") {
         Some(w) => w,
         None => match build_status_window(app) {
@@ -607,7 +608,7 @@ fn show_status_window(app: &AppHandle, anchor: Option<Rect>) {
 
 /// 擺在圖示旁邊：水平對準圖示中間、不超出螢幕；
 /// 工作列在下面（Windows 預設）就貼著工作列往上長，在上面（macOS 選單列）就往下長
-fn place_status_window(app: &AppHandle, win: &WebviewWindow, anchor: Option<Rect>) {
+fn place_status_window(app: &AppHandle, win: &WebviewWindow, anchor: Option<tauri::Rect>) {
     // 圖示的位置在 Windows 是實體像素；萬一給的是邏輯像素，先用主螢幕的縮放比例換算
     let scale_guess = app.primary_monitor().ok().flatten().map_or(1.0, |m| m.scale_factor());
     let (cx, cy) = match anchor {
