@@ -542,6 +542,13 @@ fn build_status_window(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .always_on_top(true)
         .skip_taskbar(true)
         .visible(false)
+        // 建立時不拿焦點。預設會在視窗還藏著時就讓 WebView 拿到焦點，
+        // 等 show 把視窗叫出來，這個焦點又被搬走；Windows 的 Focused 事件
+        // 是照 WebView 的焦點送的，於是送來一個 Focused(false)，剛打開的
+        // 視窗就被下面的「點到別的地方就收起來」收掉。只有第一次打開會這樣：
+        // 之後視窗已經建好，不會再經過建立這一步。
+        // 焦點交給 show_status_window 的 show、set_focus，跟之後每次打開一樣
+        .focused(false)
         .build()?;
     let handle = app.clone();
     win.on_window_event(move |event| match event {
