@@ -2026,7 +2026,7 @@ function setToy(t) {                                   // 系統匣的「玩具�
 /* ═══ 串門子：隔壁的貓會來作客，家裡的貓也會去隔壁 ═══
    貓在誰的畫面上，就由誰跑牠的動作；走過邊界時才傳一則訊息交接，另外每秒互相打招呼對帳。
    網頁版用 BroadcastChannel 讓同一個瀏覽器的兩個視窗互當隔壁，貓從靠近對方視窗的那一邊走過去；
-   桌寵版之後改成在區網上連線，訊息不變。
+   桌寵版由 Rust 在區網上找人、連線（main.rs 的「串門子」、link.rs），訊息一樣，隔壁在哪一邊照狀態視窗的設定。
    訊息：hi（每秒一次：毛色、視窗在螢幕上的位置、安靜模式、我的貓在不在你那邊、我家有沒有你的貓）、
    visit（我的貓走過去了）、home（你的貓走回去了）、recall（我的貓待太久，叫牠回來）、bye（我要關了） */
 const COATS = {                                        // 毛色：換掉毛（F）、斑紋（D）、白襪白胸口（W）、眼睛（G）的顏色
@@ -2050,14 +2050,20 @@ const ME = Math.random().toString(36).slice(2, 10);   // 這個視窗的代號
 let peer = null;                                       // 隔壁 { id, sx, q, hasGuest, seen, odd }：sx 視窗在螢幕上的 x、q 安靜模式、odd 對帳對不上幾次了
 let guest = null;                                      // 隔壁來作客的貓
 let linkT = 0;                                         // 連線用的時鐘（格）
-const link = TAURI || !window.BroadcastChannel ? null : new BroadcastChannel('yarncat');
-if (link) {
-  link.onmessage = e => onLink(e.data);
+const chan = !TAURI && window.BroadcastChannel ? new BroadcastChannel('yarncat') : null;   // 網頁版的「連線」
+let linkUp = !!chan;                                   // 有沒有線可以說話：網頁版開了頻道就有，桌寵版等 Rust 說連上了
+let linkSide = 1;                                      // 桌寵版：隔壁在我的哪一邊（1 右邊、-1 左邊），Rust 照狀態視窗的設定算好送來
+if (chan) {
+  chan.onmessage = e => onLink(e.data);
   window.addEventListener('pagehide', () => say({ t: 'bye' }));
 }
-function say(m) { if (link) link.postMessage({ ...m, v: LINK_V, id: ME }); }
-// 隔壁在哪一邊：網頁版看兩個視窗誰左誰右，疊在一起就比代號（桌寵版之後改成系統匣設定）
-const peerSide = () => (peer.sx === window.screenX ? ME < peer.id : peer.sx > window.screenX) ? 1 : -1;
+function say(m) {
+  if (!linkUp) return;
+  m = { ...m, v: LINK_V, id: ME };
+  if (chan) chan.postMessage(m); else TAURI.core.invoke('link_send', { msg: m }).catch(() => {});
+}
+// 隔壁在哪一邊：網頁版看兩個視窗誰左誰右，疊在一起就比代號
+const peerSide = () => TAURI ? linkSide : (peer.sx === window.screenX ? ME < peer.id : peer.sx > window.screenX) ? 1 : -1;
 // 去隔壁：隔壁在、沒開安靜模式、那邊沒有客人；自己家也沒有客人（有客人就在家陪），還有精神
 const canVisit = () => peer && !peer.q && !peer.hasGuest && !guest && cat.energy > 30;
 
@@ -2080,7 +2086,7 @@ function lostPeer() {                                  // 隔壁關掉了、5 �
   if (cat.state === 'away') comeHome();
   if (guest && guest.state !== 'exit') guestSet('exit', 999);
 }
-function onLink(m) {                                   // 收到隔壁的訊息。之後區網連線也走這裡，所以每個欄位都要檢查
+function onLink(m) {                                   // 收到隔壁的訊息。桌寵版是從區網上別台電腦送來的，所以每個欄位都要檢查
   if (!m || m.v !== LINK_V || typeof m.id !== 'string' || m.id === ME || (m.to && m.to !== ME)) return;
   if (m.t === 'bye') { if (peer && m.id === peer.id) lostPeer(); return; }
   if (!peer) {                                         // 新的隔壁：第一次串門子 2～4 分鐘後
@@ -2117,11 +2123,29 @@ function onLink(m) {                                   // 收到隔壁的訊息�
   }
 }
 function linkTick() {                                  // 每格：每秒打一次招呼，5 秒沒消息就當隔壁不在了
-  if (!link) return;
+  if (!linkUp) return;
   linkT++;
-  if (linkT % 60 === 0) say({ t: 'hi', coat: myCoat, sx: window.screenX, q: quiet,
+  if (linkT % 60 === 0) say({ t: 'hi', coat: myCoat, q: quiet, ...(chan && { sx: window.screenX }),   // 視窗位置只有網頁版用得到
     away: cat.state === 'away' && peer ? peer.id : '', guest: guest ? guest.from : '' });
   if (peer && linkT - peer.seen > 300) lostPeer();
+}
+function goVisit() {                                   // 狀態視窗按「叫牠去隔壁玩」：在家閒著就馬上出門
+  visitCD = 0;
+  if (canVisit() && canMeet()) setState('leave', trek(0.6));
+}
+if (TAURI) {
+  TAURI.event.listen('link', ({ payload }) => onLink(payload));
+  // 連上、斷線、改了隔壁在哪一邊時送來 { up, side }。斷線就跟隔壁關掉一樣：自己的貓回家，客人也回家
+  const setLink = s => {
+    if (!s) return;
+    linkUp = !!s.up;
+    linkSide = s.side < 0 ? -1 : 1;
+    if (!linkUp && peer) lostPeer();
+  };
+  TAURI.event.listen('link-conn', ({ payload }) => setLink(payload));
+  TAURI.core.invoke('link_state').then(setLink).catch(() => {});
+  TAURI.event.listen('link-go', () => goVisit());
+  TAURI.event.listen('call-home', () => { if (cat.state === 'away') callHome(); });
 }
 
 /* 客人貓：沿用家裡的貓的姿勢，用牠自己的毛色畫。只會走進來、跟主人家的貓碰鼻子、坐坐、舔毛、走走、打盹，
@@ -2245,6 +2269,7 @@ function catStatus() {                                 // 狀態視窗要顯示�
     poop: litter.on ? litter.poop.length : null, dirty: DIRTY,   // 貓砂盆收起來了就是 null
     coat: myCoat, coatName: COAT_NAMES[myCoat] || myCoat, toy: TOY_NAMES[toy],
     picture: away ? null : catPicture(),               // 去隔壁作客時家裡沒有貓
+    away, canVisit: !!canVisit(),                      // 「狀態」分頁的「叫牠回家」「叫牠去隔壁玩」按鈕
   };
 }
 const coatCards = () => Object.keys(COATS).map(k => ({ id: k, name: COAT_NAMES[k] || k, picture: catPicture(k, sitPose(0, 'sit')) }));

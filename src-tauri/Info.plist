@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Tauri 打包 macOS 版時會把這個檔案併進 app 的 Info.plist。
+     macOS 15 以上連區網要使用者同意「區域網路」權限，詢問時顯示這段說明（串門子用） -->
+<plist version="1.0">
+<dict>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>毛球貓要在區網上找另一台電腦的貓，讓兩隻貓互相串門子。</string>
+</dict>
+</plist>

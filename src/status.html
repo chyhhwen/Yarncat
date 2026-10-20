@@ -51,6 +51,9 @@
   #away { position: absolute; inset: 0 0 14px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--sub); }
   .who h2 { font-size: 18px; line-height: 24px; }
   #doing { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 999px; background: var(--well); font-size: 12px; color: var(--sub2); }
+  #link-go { display: block; margin-top: 10px; height: 30px; padding: 0 12px; border: 1px solid var(--accent); border-radius: 999px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 700; }
+  #link-go:hover { background: var(--accent); color: #fff; }
+  #link-go:disabled { opacity: 0.5; cursor: default; background: #fff; color: var(--accent); }
   .stat { display: flex; flex-direction: column; gap: 5px; }
   .stat-head { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; font-weight: 700; color: var(--sub2); }
   .stat-head .num { font-weight: 400; color: var(--ink); }
@@ -97,10 +100,43 @@
   .screen[aria-pressed="true"] { border-color: var(--accent); }
   .screen[aria-pressed="true"]::before { border-color: var(--accent); background: radial-gradient(circle, var(--accent) 0 4px, transparent 4.5px); }
 
+  /* 連線（內容多的時候可以捲） */
+  #tab-link { gap: 8px; overflow-y: auto; }
+  .link-body { display: flex; flex-direction: column; gap: 8px; }
+  .label { font-size: 12px; font-weight: 700; color: var(--sub2); }
+  .peers { display: flex; flex-direction: column; gap: 6px; }
+  .peers:empty { display: none; }
+  .peer { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 4px 12px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; text-align: left; }
+  .peer:hover, .peer[aria-pressed="true"] { border-color: var(--accent); }
+  .peer::before { content: ""; width: 18px; height: 18px; flex: none; box-sizing: border-box; border-radius: 4px; border: 2px solid #8a93a1; }
+  .peer[aria-pressed="true"]::before {
+    border-color: var(--accent);
+    background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17 19 7'/%3E%3C/svg%3E") center / 12px no-repeat;
+  }
+  .peer span { flex: 1; min-width: 0; }
+  .peer b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .peer em { font-style: normal; font-size: 12px; color: var(--sub); white-space: nowrap; }
+  .peer em.ok { font-weight: 700; color: var(--accent); }
+  .empty { margin: 0; font-size: 12px; color: var(--sub); }
+  .side-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+  .seg { display: flex; border: 1px solid var(--edge); border-radius: 8px; overflow: hidden; }
+  .seg button { min-width: 56px; height: 32px; border: 0; background: #fff; font-size: 13px; }
+  .seg button + button { border-left: 1px solid var(--edge); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .ip-row { display: flex; gap: 6px; }
+  .ip-row input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--edge); border-radius: 8px; background: #fff; color: var(--ink); font: inherit; font-size: 13px; user-select: text; -webkit-user-select: text; }
+  .ip-row input:focus { border-color: var(--accent); outline: 1px solid var(--accent); }
+  .ip-row button { height: 32px; padding: 0 14px; border: 1px solid var(--edge); border-radius: 8px; background: #fff; font-size: 13px; }
+  .ip-row button:hover { border-color: var(--accent); }
+  .ips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ips:empty { display: none; }
+  .chip { display: inline-flex; align-items: center; height: 24px; padding: 0 0 0 8px; border-radius: 999px; background: var(--well); font-size: 12px; }
+  .chip button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--sub); }
+  .chip button:hover { color: var(--ink); }
+
   /* 系統 */
   .action { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 12px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; text-align: left; }
-  .action:hover { border-color: var(--accent); }
-  .action svg { flex: none; }
+  .action:hover { border-color: var(--accent); }  .action svg { flex: none; }
   #version { margin-top: auto; font-size: 11px; color: var(--sub); }
 </style>
 </head>
@@ -125,6 +161,9 @@
     <button type="button" data-tab="screen" aria-label="螢幕" title="螢幕" aria-pressed="false"><span>
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/></svg>
     </span></button>
+    <button type="button" data-tab="link" aria-label="連線" title="連線" aria-pressed="false"><span>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+    </span></button>
     <button type="button" data-tab="system" aria-label="系統" title="系統" aria-pressed="false"><span>
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
     </span></button>
@@ -139,6 +178,7 @@
         <div>
           <h2>毛球貓</h2>
           <span id="doing">…</span>
+          <button type="button" id="link-go" hidden></button>
         </div>
       </div>
       <div class="stat">
@@ -179,6 +219,32 @@
       <div class="screens" id="screens"></div>
     </section>
 
+    <section id="tab-link" hidden>
+      <div class="row">
+        <div><b>連線</b><small>互相勾選，貓就會去串門子</small></div>
+        <button type="button" class="switch" id="link-on" aria-label="連線" aria-pressed="false"></button>
+      </div>
+      <span class="warn" id="link-error" hidden></span>
+      <div class="link-body" id="link-body" hidden>
+        <span class="label">找到的電腦</span>
+        <div class="peers" id="peers"></div>
+        <p class="empty" id="peers-empty">還沒找到。另一台也要打開連線；Windows 問要不要允許毛球貓時，「公用網路」也要勾。不同網段的話，在下面輸入對方的 IP。</p>
+        <div class="side-row">
+          <span>隔壁在我的</span>
+          <div class="seg" role="group" aria-label="隔壁在我的哪一邊">
+            <button type="button" data-side="left" aria-pressed="false">左邊</button><button type="button" data-side="right" aria-pressed="false">右邊</button>
+          </div>
+        </div>
+        <form class="ip-row" id="ip-form">
+          <input id="ip-input" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="手動輸入對方的 IP" aria-label="對方的 IP">
+          <button type="submit">加入</button>
+        </form>
+        <div class="ips" id="ips"></div>
+        <span class="warn" id="ip-error" hidden></span>
+        <small id="link-me"></small>
+      </div>
+    </section>
+
     <section id="tab-system" hidden>
       <h2>系統</h2>
       <button type="button" class="action" id="open-pictures">
@@ -195,20 +261,23 @@
 </div>
 <script>
 /* 資料從哪來：
-   - 設定（毛色、家具、螢幕）：Rust 的 get_settings；改了會收到 settings 事件
+   - 設定（毛色、家具、螢幕、連線）：Rust 的 get_settings；改了會收到 settings 事件
    - 貓現在的樣子：貓的視窗（index.html）在這個視窗開著時每半秒送一次 cat-status
-   - 毛色選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards 過來 */
+   - 毛色選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards 過來
+   - 連線：找到的電腦、連上沒，Rust 的 link_status；有變會收到 link-status 事件 */
 const TAURI = window.__TAURI__;
 const $ = id => document.getElementById(id);
-const TABS = { status: '狀態', coat: '毛色', furn: '家具', screen: '螢幕', system: '系統' };
+const TABS = { status: '狀態', coat: '毛色', furn: '家具', screen: '螢幕', link: '連線', system: '系統' };
 const SCALE = 3;                                       // 貓的小圖放大幾倍（跟桌面上一樣大；最寬的飛撲 35 格 × 3 剛好塞得進框）
-let settings = { coat: null, furniture: { litter: true, tree: true, box: true }, screen: null };
+let settings = { coat: null, furniture: { litter: true, tree: true, box: true }, screen: null, link: { on: false, ips: [] } };
 let catCoat = 'gray';                                  // 貓現在的毛色（沒選過時是預設的藍灰）
 let coats = [];                                        // 毛色選單：[{ id, name, picture }]
 let screens = [];                                      // [{ key, label, chosen }]
+let link = { on: false, name: '', ips: [], peers: [], error: null, side: 1 };   // 連線狀態（見 main.rs 的 LinkView）
+let catAway = false, catCanVisit = false;              // 貓在不在隔壁、現在能不能去隔壁（「叫牠回家」「叫牠去隔壁」按鈕用）
 
 // 用瀏覽器直接打開這個檔案時（不在桌寵裡）用假資料，方便調版面
-const call = (cmd, args) => TAURI ? TAURI.core.invoke(cmd, args) : Promise.resolve(fake(cmd, args));
+const call = (cmd, args) => TAURI ? TAURI.core.invoke(cmd, args) : Promise.resolve().then(() => fake(cmd, args));
 
 /* ─── 分頁 ─── */
 function showTab(tab) {
@@ -216,6 +285,7 @@ function showTab(tab) {
   for (const k of Object.keys(TABS)) $('tab-' + k).hidden = k !== tab;
   $('tab-name').textContent = '· ' + TABS[tab];
   if (tab === 'screen') loadScreens();                 // 剛接上的螢幕也列得出來
+  if (tab === 'link') loadLink();
 }
 for (const b of document.querySelectorAll('nav button')) b.addEventListener('click', () => showTab(b.dataset.tab));
 
@@ -259,6 +329,8 @@ function renderStatus(s) {
   $('fact-coat').textContent = s.coatName;
   $('fact-toy').textContent = s.toy;
   if (s.coat !== catCoat) { catCoat = s.coat; renderCoats(); }
+  catAway = !!s.away; catCanVisit = !!s.canVisit;
+  renderGo();
 }
 
 /* ─── 毛色 ─── */
@@ -307,6 +379,75 @@ function renderScreens() {
   $('fact-screen').textContent = chosen ? chosen.label.split('：')[0] : '–';
 }
 
+/* ─── 連線：兩台都打開、互相勾選對方就連上（main.rs 的「串門子」、link.rs） ─── */
+function loadLink() {
+  call('link_status').then(s => { if (s) { link = s; renderLink(); } }).catch(() => {});
+}
+function peerNote(p) {                                 // 勾選框右邊的小字
+  if (p.connected) return '已連上';
+  if (!p.ip) return '不在線上';
+  if (p.chosen) return p.wants_me ? '連線中…' : '等對方也勾選你';
+  return p.wants_me ? '對方勾選你了' : '';
+}
+function renderLink() {
+  $('link-on').setAttribute('aria-pressed', String(link.on));
+  $('link-body').hidden = !link.on;
+  $('peers').replaceChildren(...link.peers.map(p => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'peer';
+    b.setAttribute('aria-pressed', String(p.chosen));
+    const text = document.createElement('span');
+    const name = document.createElement('b');
+    name.textContent = p.name || p.ip;
+    const ip = document.createElement('small');
+    ip.textContent = p.ip || '–';
+    text.append(name, ip);
+    const note = document.createElement('em');
+    note.textContent = peerNote(p);
+    if (p.connected) note.className = 'ok';
+    b.append(text, note);
+    b.addEventListener('click', () => call('set_link_peer', { id: p.chosen ? null : p.id }).catch(() => {}));
+    return b;
+  }));
+  $('peers-empty').hidden = link.peers.length > 0;
+  for (const b of document.querySelectorAll('[data-side]')) b.setAttribute('aria-pressed', String((b.dataset.side === 'left' ? -1 : 1) === link.side));
+  const ips = (settings.link && settings.link.ips) || [];
+  $('ips').replaceChildren(...ips.map(ip => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.textContent = '×';
+    x.setAttribute('aria-label', '移除 ' + ip);
+    x.addEventListener('click', () => call('remove_link_ip', { ip }).catch(() => {}));
+    chip.append(ip, x);
+    return chip;
+  }));
+  $('link-me').textContent = '這台：' + link.name + (link.ips.length ? ' · ' + link.ips.join('、') : '');
+  $('link-error').hidden = !link.error;
+  $('link-error').textContent = link.error || '';
+  renderGo();
+}
+function renderGo() {                                  // 「狀態」分頁貓旁邊的按鈕：連上時可以叫貓過去，貓在隔壁時可以叫牠回來
+  const go = $('link-go');
+  go.hidden = !catAway && !(link.on && link.peers.some(p => p.connected));
+  go.textContent = catAway ? '叫牠回家' : '叫牠去隔壁玩';
+  go.disabled = !catAway && !catCanVisit;
+  go.title = go.disabled ? '貓累了、家裡有客人，或隔壁開了安靜模式時不會去' : '';
+}
+$('link-on').addEventListener('click', () => call('set_link_on', { on: !link.on }).then(loadLink).catch(() => {}));
+$('link-go').addEventListener('click', () => { if (TAURI) TAURI.event.emitTo('main', catAway ? 'call-home' : 'link-go'); });
+for (const b of document.querySelectorAll('[data-side]')) b.addEventListener('click', () => call('set_link_side', { side: b.dataset.side }).catch(() => {}));
+$('ip-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const input = $('ip-input'), ip = input.value.trim();
+  if (!ip) return;
+  call('add_link_ip', { ip })
+    .then(() => { input.value = ''; $('ip-error').hidden = true; })
+    .catch(err => { $('ip-error').textContent = String(err); $('ip-error').hidden = false; });
+});
+
 /* ─── 系統 ─── */
 if (/Mac/.test(navigator.platform)) $('pictures-path').textContent = '~/Pictures/YarnCat';
 $('open-pictures').addEventListener('click', () => call('open_picture_folder'));
@@ -317,6 +458,7 @@ if (TAURI && TAURI.app) TAURI.app.getVersion().then(v => { $('version').textCont
 function renderSettings() {
   for (const b of document.querySelectorAll('[data-furn]')) b.setAttribute('aria-pressed', String(settings.furniture[b.dataset.furn] !== false));
   renderCoats();
+  renderLink();                                        // 手動輸入的 IP 存在設定裡
 }
 function loadSettings() {
   call('get_settings').then(s => { if (s) { settings = s; renderSettings(); } }).catch(() => {});
@@ -328,14 +470,16 @@ if (TAURI) {
     on('cat-status', renderStatus),
     on('coat-cards', list => { coats = list || []; renderCoats(); }),
     on('settings', s => { settings = s; renderSettings(); loadScreens(); }),
-    on('status-shown', () => { showTab('status'); loadSettings(); loadScreens(); }),   // 每次打開都從「狀態」開始
+    on('link-status', s => { link = s; renderLink(); }),
+    on('status-shown', () => { showTab('status'); loadSettings(); loadScreens(); loadLink(); }),   // 每次打開都從「狀態」開始
   ]).then(() => TAURI.event.emitTo('main', 'status-ready'));   // 請貓的視窗把小圖、現在的狀態送過來
 } else {
   coats = [{ id: 'gray', name: '藍灰虎斑' }, { id: 'orange', name: '橘貓' }, { id: 'tuxedo', name: '黑白賓士' }];
-  renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', toy: '毛球', picture: null });
+  renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', toy: '毛球', picture: null, away: false, canVisit: true });
 }
 loadSettings();
 loadScreens();
+loadLink();
 
 function fake(cmd, args) {                             // 瀏覽器版的假 Rust
   switch (cmd) {
@@ -347,6 +491,16 @@ function fake(cmd, args) {                             // 瀏覽器版的假 Rus
     case 'set_coat': settings.coat = args.coat; renderSettings(); return;
     case 'set_furniture': settings.furniture[args.name] = args.on; renderSettings(); return;
     case 'set_screen': screens = screens.map(s => ({ ...s, chosen: s.key === args.key })); return;
+    case 'link_status': return link.peers.length ? link : {
+      on: true, name: 'DESKTOP-HOST', ips: ['192.168.62.1', '192.168.50.232'], error: null, side: 1,
+      peers: [{ id: 'b', name: 'DESKTOP-VM', ip: '192.168.62.128', chosen: true, wants_me: true, connected: true },
+              { id: 'c', name: 'LAPTOP-7Q2', ip: '192.168.50.40', chosen: false, wants_me: true, connected: false }],
+    };
+    case 'set_link_on': link.on = args.on; return;
+    case 'set_link_peer': link.peers = link.peers.map(p => ({ ...p, chosen: p.id === args.id, connected: p.id === args.id && p.wants_me })); renderLink(); return;
+    case 'set_link_side': link.side = args.side === 'left' ? -1 : 1; renderLink(); return;
+    case 'add_link_ip': if (!/^\d+\.\d+\.\d+\.\d+$/.test(args.ip)) throw new Error('不是 IP：' + args.ip); settings.link.ips.push(args.ip); renderLink(); return;
+    case 'remove_link_ip': settings.link.ips = settings.link.ips.filter(x => x !== args.ip); renderLink(); return;
   }
 }
 </script>

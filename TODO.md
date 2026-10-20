@@ -6,57 +6,66 @@
 
 - [x] 第一階段：確認兩台電腦在區網可以直連（PowerShell 開 TCP 52525 測試通過）
 - [x] 第二階段：網頁版用兩個並排的瀏覽器視窗模擬（毛色、出門、客人貓、碰鼻子、對帳）
-- [ ] 第三階段：桌寵版接上區網連線（Rust）
+- [x] 第三階段：桌寵版接上區網連線（Rust）：1.2.0，Windows ↔ Windows（VMware 虛擬機）實測成功
 - [ ] 第四階段：收尾
 
 ## 開工前先決定
 
 - [ ] 毛色選項：目前有藍灰、橘貓、黑白賓士（`COATS`），要不要再加
 - [x] 毛色要記住：毛色、家具、螢幕存在 `settings.json`（main.rs 的 `Settings`）；玩具、安靜模式不記
-- [ ] 「隔壁在哪一邊」要不要也記住（要的話放進同一個 `Settings`）
+- [x] 「隔壁在哪一邊」要記住：`Settings.link.side`；沒選過是自動（比兩台的代號，一台算右邊、另一台算左邊）
 - [ ] 頻率：出門每 8～15 分鐘（`comeHome` 裡的 `visitCD`）、每次待 1～3 分鐘（`onLink` 裡的 `stay`）、最多待 5 分鐘（`goAway` 的 `18000`）
 - [ ] 要不要能把貓甩到畫面邊緣，直接送去隔壁
 - [ ] 客人要不要能用主人家的家具（躲紙箱、跳上貓跳台）；目前不行
 
 ## 第三階段：區網連線
 
-做法：Rust 只負責找人、配對、連線和轉送訊息，串門子的邏輯全部留在前端，跟網頁版共用。
+做法：Rust 只負責找人、配對、連線和轉送訊息（`src-tauri/src/link.rs`，接上設定和視窗在 main.rs 的「串門子」），串門子的邏輯全部留在前端，跟網頁版共用。
 
 ### 找人、配對
-- [ ] 「連線」預設關閉，打開了才開始廣播、接受連線
-- [ ] UDP 廣播找人：每 2 秒廣播一次 `{ app: 'yarncat', v, id, name }`（name 是電腦名稱），port 52525
-- [ ] 狀態視窗的「連線」分頁列出找到的電腦；兩邊互相勾選對方才算連上（不用打字，也等於雙方都同意）
-- [ ] 廣播只在同一個網段有效：公司按樓層切網段的話，要加「手動輸入 IP」（放在「連線」分頁）
+- [x] 「連線」預設關閉，打開了才開始廣播、接受連線（開關會記住）
+- [x] UDP 廣播找人：每 2 秒廣播一次 `{ app: 'yarncat', v, id, name, want, port, re }`，port 52525。`want` 是我勾了誰，`re` 是回覆
+  - 送到每張網卡的廣播位址（`if-addrs`）：255.255.255.255 只會從一張網卡出去，VMware 的虛擬網卡收不到
+  - 收到廣播馬上直接回一則（同一台每秒最多一次）：Windows 防火牆會放行剛送出廣播後的回覆
+  - 另外也直接送給手動輸入的 IP 和已經找到的電腦
+- [x] 狀態視窗的「連線」分頁列出找到的電腦；兩邊互相勾選對方才算連上（不用打字，也等於雙方都同意）
+- [x] 「手動輸入 IP」（放在「連線」分頁）：不同網段時改成直接送過去；只要一邊輸入，另一邊收到後也會回
 
 ### 連線、轉送
-- [ ] TCP port 52525，一行一則 JSON；一行超過 4 KB 就斷線
-- [ ] 收到的訊息用 `emit('link', 訊息)` 交給前端；前端用 `invoke('link_send', { msg })` 送出。欄位檢查交給前端的 `onLink`（已經會逐欄檢查）
-- [ ] 斷線時 emit 一則 `{ t: 'bye' }` 給前端，之後照網頁版的流程走
+- [x] TCP port 52525，一行一則 JSON；一行超過 4 KB 就斷線
+  - 握手：兩邊各送一行 `{ app, v, id, want }`，要互相勾選才留下來
+  - 代號小的那邊先撥；5 秒還沒連上，代號大的那邊也撥（防火牆只擋一邊時還連得上）。兩條都通時留撥號方代號小的那條
+  - 每 3 秒送一個空行，10 秒沒收到任何東西就當作斷線
+- [x] 收到的訊息用 `emit('link', 訊息)` 交給前端；前端用 `invoke('link_send', { msg })` 送出。欄位檢查交給前端的 `onLink`
+- [x] 斷線時不送 `{ t: 'bye' }`（前端的 `onLink` 要 `id` 才認），改送 `link-conn` `{ up: false }`，前端照「隔壁關掉了」處理（`lostPeer`）
 
 ### 前端（`src/index.html`）
-- [ ] `link` 在桌寵版改走上面的事件和 command（現在桌寵版的 `link` 是 `null`，完全不會連線）。`say()` 改成呼叫一個共用的 `send`，網頁版用 BroadcastChannel，桌寵版用 `invoke`
-- [ ] `peerSide()` 在桌寵版改用狀態視窗的設定（網頁版是比兩個視窗的 `screenX`）
-- [ ] `hi` 裡的 `sx`（視窗位置）桌寵版用不到
+- [x] `say()` 網頁版用 BroadcastChannel，桌寵版用 `invoke('link_send')`；`linkUp` 是現在有沒有線可以說話
+- [x] `peerSide()` 在桌寵版用 Rust 送來的 `linkSide`（狀態視窗的設定）
+- [x] `hi` 裡的 `sx`（視窗位置）只有網頁版送
 
 ### 狀態視窗（`src/status.html`，左鍵點系統匣圖示）
-- [ ] 「連線」分頁：開關、找到的電腦（勾選後連上）、手動輸入 IP
-- [ ] 隔壁在我的：左邊／右邊
+- [x] 「連線」分頁：開關、找到的電腦（勾選後連上）、手動輸入 IP、這台的電腦名稱和 IP
+- [x] 隔壁在我的：左邊／右邊
 - [x] 毛色：藍灰／橘貓／黑白（「毛色」分頁）
-- [ ] 叫貓回家：呼叫前端的 `callHome()`（右鍵選單或狀態視窗）
-- [ ] 連不上時要顯示原因（可能被防火牆擋住、Windows 把網路標成「公用」）
+- [x] 叫貓回家、叫牠去隔壁玩：「狀態」分頁貓旁邊的按鈕（連上時才出現），送 `call-home`、`link-go` 給貓的視窗
+- [ ] 連不上時要顯示原因：目前只有 port 開不了會顯示；找不到人時只顯示提示（防火牆、公用網路、不同網段），分不出是哪一個
 
 ### 平台、實機測試
-- [ ] Windows：第一次開 port 會跳防火牆詢問。網路被標成「公用」時預設會擋下，要在 README 說明，或讓安裝程式加防火牆規則
-- [ ] macOS 15 以上：連區網要使用者同意「區域網路」權限，Info.plist 要加 `NSLocalNetworkUsageDescription`；Mac 上廣播可能還有其他限制，要用實機確認
-- [ ] 實機測：Windows ↔ Windows、Windows ↔ Mac；拔網路線、一邊關掉、電腦睡眠再喚醒
+- [x] Windows：第一次開 port 會跳防火牆詢問。網路被標成「公用」時預設會擋下：README「串門子」已說明要勾「公用網路」
+- [ ] macOS 15 以上：`src-tauri/Info.plist` 已加 `NSLocalNetworkUsageDescription`（Tauri 打包時會併進去），還沒用實機確認；Mac 上廣播可能還有其他限制
+- [x] 同一台電腦上的兩個節點：`cargo test`（`link.rs` 的 `two_nodes`、`rejects`）
+- [x] 實機測：Windows ↔ Windows（VMware 虛擬機）連上、串門子成功
+- [ ] 實機測：Windows ↔ Mac；拔網路線、一邊關掉、電腦睡眠再喚醒
 
 ## 第四階段：收尾
 
 - [ ] 貓不在家時，地上留一排往邊緣走的腳印，慢慢淡掉
-- [ ] README「怎麼玩」加上怎麼連線、串門子會發生什麼
-- [ ] README「隱私」改寫：預設不連網；開了「連線」才會在區網廣播電腦名稱，並跟你勾選的那台互傳貓的狀態；不經過伺服器，不傳游標位置和圖片
+- [x] README「怎麼玩」加上怎麼連線、串門子會發生什麼（「串門子」小節）
+- [x] README「隱私」改寫（商店的隱私權政策也改了，在 `src-tauri/msix/README.md`）：預設不連網；開了「連線」才會在區網廣播電腦名稱，並跟你勾選的那台互傳貓的狀態；不經過伺服器，不傳游標位置和圖片
 - [ ] README 展示加一支串門子的 GIF：`node tools/make-gifs.mjs visit` 會錄到 `docs/visit.gif`
-- [ ] 版本號（`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三個地方）、Release notes
+- [x] 版本號 1.2.0（`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三個地方）
+- [ ] Release notes
 
 ## 參考
 
@@ -83,10 +92,13 @@
   - `updateGuest`、`guestIdle`、`drawGuest`：客人貓
   - `COATS`、`coatPal`、`nextCoat`：毛色
 - `updateCat` 最後面的 `leave`、`away`、`arrive`、`meet`、`boop`：自己的貓出門、回家、跟客人碰鼻子
-- `src-tauri/src/main.rs`：`watch_cursor` 是「背景執行緒 + `emit` 事件給前端」的現成例子，系統匣在 `main` 裡
+- `src-tauri/src/main.rs`：`watch_cursor` 是「背景執行緒 + `emit` 事件給前端」的現成例子，系統匣在 `main` 裡；「串門子」段落接上設定和視窗
+- `src-tauri/src/link.rs`：區網連線（找人、配對、連線、轉送）
 
 ### 怎麼測
 - 網頁版：兩個 Edge 視窗並排打開 `src/index.html`，按 `v` 叫貓馬上過去，按 `c` 換毛色
+- 桌寵版：本機一台、VMware 虛擬機一台（NAT 網路，虛擬機 192.168.62.128、本機在 VMnet8 上是 192.168.62.1），兩邊都在「連線」分頁打開、互相勾選；「狀態」分頁按「叫牠去隔壁玩」不用等
+- Rust：`cd src-tauri && cargo test`
 - 被縮小或完全被蓋住的視窗，遊戲會停住；在那邊作客的貓 5 分鐘後會被叫回來
 - 重錄 README 的 GIF：`node tools/make-gifs.mjs`，說明在 `tools/README.md`
 

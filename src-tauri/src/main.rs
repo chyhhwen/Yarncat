@@ -1,25 +1,29 @@
 // 正式版不跳出黑色主控台視窗
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod link;
+
 use std::{
     ffi::OsStr,
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     process::Command,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     thread,
     time::{Duration, Instant},
 };
 
+use link::Link;
 use serde::{Deserialize, Serialize};
 use tauri::{
     ipc::Response,
     menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::Monitor,
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder, WindowEvent,
 };
 
@@ -339,7 +343,7 @@ mod appkit {
     }
 }
 
-/* ─── 設定：會記住的只有毛色、家具、貓待在哪個螢幕 ─── */
+/* ─── 設定：會記住的只有毛色、家具、貓待在哪個螢幕、串門子的連線設定 ─── */
 
 /// 存在 app 設定資料夾的 settings.json（Windows 是 %APPDATA%\com.yarncat.desktop；
 /// 商店版會被 Windows 導到 app 自己的資料夾，解除安裝時一起清掉）。
@@ -353,7 +357,33 @@ struct Settings {
     furniture: Furniture,
     /// 貓待在哪個螢幕（monitor_key）；None 是主螢幕
     screen: Option<String>,
+    link: LinkSettings,
 }
+
+/// 串門子的連線設定（狀態視窗的「連線」分頁）
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct LinkSettings {
+    /// 「連線」開關。預設關閉：打開了才會開 port、在區網上廣播電腦名稱
+    on: bool,
+    /// 這台電腦的代號，第一次開毛球貓時產生；另一台靠它記得勾的是哪一台
+    id: String,
+    /// 勾選的那台；兩邊互相勾選才會連上
+    peer: Option<LinkPeer>,
+    /// 隔壁在我的哪一邊："left"、"right"。None 是自動：比兩台的代號，一台算右邊、另一台就算左邊
+    side: Option<String>,
+    /// 手動輸入的 IP：不同網段時廣播傳不過去
+    ips: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct LinkPeer {
+    id: String,
+    name: String,
+}
+
+/// 手動輸入的 IP 最多記幾個
+const LINK_MAX_IPS: usize = 8;
 
 /// 家具擺不擺出來；預設全部擺出來
 #[derive(Clone, Serialize, Deserialize)]
@@ -412,11 +442,15 @@ fn update_settings(app: &AppHandle, change: impl FnOnce(&mut Settings)) {
     let _ = app.emit("settings", &snapshot);
 }
 
-#[tauri::command]
-fn get_settings(app: AppHandle) -> Settings {
+fn settings_snapshot(app: &AppHandle) -> Settings {
     let state = app.state::<Mutex<Settings>>();
     let settings = state.lock().map(|s| s.clone()).unwrap_or_default();
     settings
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle) -> Settings {
+    settings_snapshot(&app)
 }
 
 /// 毛色的名字只收小寫英文字母（gray、orange…）。有哪些毛色由前端的 COATS 決定，這裡不重複列一份；
@@ -502,6 +536,170 @@ fn set_screen(app: AppHandle, key: String) -> Result<(), String> {
     PLACE_NOW.store(true, Ordering::Relaxed);
     update_settings(&app, |s| s.screen = Some(key));
     Ok(())
+}
+
+/* ─── 串門子：區網連線在 link.rs，這裡接上設定和兩個視窗 ───
+   貓的視窗（index.html）：收 link（隔壁的訊息）、link-conn（連上沒、隔壁在哪一邊），用 link_send 送出。
+   狀態視窗（status.html）的「連線」分頁：收 link-status，用下面的 set_link_* 改設定。 */
+
+/// 貓的視窗要知道的：連上了沒、隔壁在哪一邊（1 右邊、-1 左邊）
+#[derive(Clone, Serialize)]
+struct LinkConn {
+    up: bool,
+    side: i8,
+}
+
+/// 「連線」分頁要顯示的：link.rs 的狀態，再加上隔壁在哪一邊（自動的話要算出來才知道勾哪個）
+#[derive(Clone, Serialize)]
+struct LinkView {
+    #[serde(flatten)]
+    status: link::Status,
+    side: i8,
+}
+
+/// 隔壁在哪一邊：狀態視窗選的那邊；沒選就比代號，
+/// 小的那台說隔壁在右邊、大的那台說在左邊，貓從這台右邊走出去，就從那台左邊走進來
+fn link_side(app: &AppHandle) -> i8 {
+    let s = settings_snapshot(app).link;
+    match s.side.as_deref() {
+        Some("left") => -1,
+        Some("right") => 1,
+        _ => match &s.peer {
+            Some(p) if p.id < s.id => -1,
+            _ => 1,
+        },
+    }
+}
+
+fn link_conn(app: &AppHandle) -> LinkConn {
+    let up = app.try_state::<Arc<Link>>().is_some_and(|l| l.connected().is_some());
+    LinkConn { up, side: link_side(app) }
+}
+
+fn send_link_conn(app: &AppHandle) {
+    let _ = app.emit_to("main", "link-conn", link_conn(app));
+}
+
+fn link_view(app: &AppHandle, link: &Link) -> LinkView {
+    LinkView { status: link.status(), side: link_side(app) }
+}
+
+fn send_link_status(app: &AppHandle) {
+    if let Some(link) = app.try_state::<Arc<Link>>() {
+        let _ = app.emit_to("status", "link-status", link_view(app, &link));
+    }
+}
+
+/// link.rs 送出來的事轉給視窗
+fn on_link_event(app: &AppHandle, event: link::Event) {
+    match event {
+        link::Event::Msg(msg) => {
+            let _ = app.emit_to("main", "link", msg);
+        }
+        link::Event::Conn => send_link_conn(app),
+        link::Event::Changed => send_link_status(app),
+    }
+}
+
+fn parse_ips(ips: &[String]) -> Vec<Ipv4Addr> {
+    ips.iter().filter_map(|s| s.parse().ok()).collect()
+}
+
+/// 在區網上顯示的電腦名稱：Windows 是 DESKTOP-XXXX 這類，macOS 是「小明的 MacBook Air」這類
+fn computer_name() -> String {
+    #[cfg(target_os = "macos")]
+    if let Ok(out) = Command::new("scutil").args(["--get", "ComputerName"]).output() {
+        let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if !name.is_empty() {
+            return name;
+        }
+    }
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "毛球貓".into())
+}
+
+#[tauri::command]
+fn link_status(app: AppHandle, link: State<Arc<Link>>) -> LinkView {
+    link_view(&app, &link)
+}
+
+/// 貓的視窗剛載入時問一次；之後連上、斷線會收到 link-conn
+#[tauri::command]
+fn link_state(app: AppHandle) -> LinkConn {
+    link_conn(&app)
+}
+
+#[tauri::command]
+fn link_send(link: State<Arc<Link>>, msg: serde_json::Value) -> Result<(), String> {
+    link.send(&msg)
+}
+
+#[tauri::command]
+fn set_link_on(app: AppHandle, link: State<Arc<Link>>, on: bool) {
+    update_settings(&app, |s| s.link.on = on);
+    link.set_on(on);
+}
+
+/// 勾選要跟哪一台連；id 是 None 就是取消。只能勾清單上找得到的電腦
+#[tauri::command]
+fn set_link_peer(app: AppHandle, link: State<Arc<Link>>, id: Option<String>) -> Result<(), String> {
+    let peer = match id {
+        Some(id) => {
+            let name = link.found_name(&id).ok_or("找不到這台電腦")?;
+            Some(LinkPeer { id, name })
+        }
+        None => None,
+    };
+    // 先存設定再換人：link.rs 換人時會通知狀態視窗，那時算「隔壁在哪一邊」要用新的那台
+    update_settings(&app, |s| s.link.peer = peer.clone());
+    link.set_peer(peer.map(|p| (p.id, p.name)));
+    send_link_conn(&app);
+    Ok(())
+}
+
+/// 隔壁在我的哪一邊；None 是自動
+#[tauri::command]
+fn set_link_side(app: AppHandle, side: Option<String>) -> Result<(), String> {
+    if side.as_deref().is_some_and(|s| s != "left" && s != "right") {
+        return Err(format!("沒有這一邊：{side:?}"));
+    }
+    update_settings(&app, |s| s.link.side = side);
+    send_link_conn(&app);
+    send_link_status(&app);
+    Ok(())
+}
+
+/// 手動輸入 IP：不同網段時廣播傳不過去，改成直接送過去
+#[tauri::command]
+fn add_link_ip(app: AppHandle, link: State<Arc<Link>>, ip: String) -> Result<(), String> {
+    let addr: Ipv4Addr = ip.trim().parse().map_err(|_| format!("不是 IP：{ip}"))?;
+    if addr.is_unspecified() || addr.is_broadcast() || addr.is_multicast() || addr.is_loopback() {
+        return Err(format!("不能用這個 IP：{addr}"));
+    }
+    let mut ips = Vec::new();
+    update_settings(&app, |s| {
+        let text = addr.to_string();
+        if !s.link.ips.contains(&text) {
+            s.link.ips.push(text);
+        }
+        if s.link.ips.len() > LINK_MAX_IPS {
+            s.link.ips.remove(0);
+        }
+        ips = s.link.ips.clone();
+    });
+    link.set_ips(parse_ips(&ips));
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_link_ip(app: AppHandle, link: State<Arc<Link>>, ip: String) {
+    let mut ips = Vec::new();
+    update_settings(&app, |s| {
+        s.link.ips.retain(|x| *x != ip);
+        ips = s.link.ips.clone();
+    });
+    link.set_ips(parse_ips(&ips));
 }
 
 #[tauri::command]
@@ -661,7 +859,15 @@ fn main() {
             set_screen,
             open_picture_folder,
             quit_app,
-            hide_status
+            hide_status,
+            link_status,
+            link_state,
+            link_send,
+            set_link_on,
+            set_link_peer,
+            set_link_side,
+            add_link_ip,
+            remove_link_ip
         ])
         .setup(|app| {
             // macOS：不在 Dock 出現，只留選單列的貓咪圖示
@@ -669,11 +875,26 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             // 設定要在擺長條之前讀：貓待在哪個螢幕也是設定
-            let settings = load_settings(app.handle());
+            let mut settings = load_settings(app.handle());
             if let Ok(mut chosen) = CHOSEN_SCREEN.lock() {
                 *chosen = settings.screen.clone();
             }
+            // 第一次開：產生這台電腦的代號（下次改設定時一起存起來）
+            if !link::valid_id(&settings.link.id) {
+                settings.link.id = link::new_id();
+            }
+            let link_settings = settings.link.clone();
             app.manage(Mutex::new(settings));
+
+            // 串門子：「連線」打開過的話，接著找人、連上次勾的那台
+            let handle = app.handle().clone();
+            let link = Link::new(link_settings.id, computer_name(), (link::PORT, link::PORT), move |e| {
+                on_link_event(&handle, e)
+            });
+            app.manage(link.clone());
+            link.set_ips(parse_ips(&link_settings.ips));
+            link.set_peer(link_settings.peer.map(|p| (p.id, p.name)));
+            link.set_on(link_settings.on);
 
             let win = app
                 .get_webview_window("main")
