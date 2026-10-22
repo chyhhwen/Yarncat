@@ -4,6 +4,7 @@
 mod link;
 
 use std::{
+    collections::{BTreeMap, HashMap},
     ffi::OsStr,
     net::Ipv4Addr,
     path::{Path, PathBuf},
@@ -343,13 +344,13 @@ mod appkit {
     }
 }
 
-/* ─── 設定：會記住的只有毛色、家具、貓待在哪個螢幕、串門子的連線設定 ─── */
+/* ─── 設定：會記住的只有毛色、家具、貓待在哪個螢幕、串門子的連線設定、要不要記貓咪日記 ─── */
 
 /// 存在 app 設定資料夾的 settings.json（Windows 是 %APPDATA%\com.yarncat.desktop；
 /// 商店版會被 Windows 導到 app 自己的資料夾，解除安裝時一起清掉）。
 /// 玩具、安靜模式是「現在在玩什麼」，不記：重開回到毛球、不安靜。
 /// 讀不到或格式不對就用預設值，設定檔壞掉也開得起來
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
 struct Settings {
     /// 毛色；None 是沒選過（藍灰，串門子撞色時可以自動換一隻）
@@ -358,6 +359,14 @@ struct Settings {
     /// 貓待在哪個螢幕（monitor_key）；None 是主螢幕
     screen: Option<String>,
     link: LinkSettings,
+    /// 記不記貓咪日記（見「貓咪日記」）。預設打開：只記次數和時間，存在自己的電腦上
+    diary: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings { coat: None, furniture: Furniture::default(), screen: None, link: LinkSettings::default(), diary: true }
+    }
 }
 
 /// 串門子的連線設定（狀態視窗的「連線」分頁）
@@ -536,6 +545,98 @@ fn set_screen(app: AppHandle, key: String) -> Result<(), String> {
     PLACE_NOW.store(true, Ordering::Relaxed);
     update_settings(&app, |s| s.screen = Some(key));
     Ok(())
+}
+
+/* ─── 貓咪日記：外傳「午睡夢遊記」讀它，讓白天玩了什麼影響晚上的夢 ───
+   放在圖片\YarnCat\diary.json，不放 app 的設定資料夾：商店版（MSIX）寫進 AppData 的東西
+   會被 Windows 導到 app 自己的資料夾，外傳讀不到；「圖片」不會被導走。
+   只記每天的次數和秒數，不記游標、不記圖片。記什麼由前端決定（index.html 的「貓咪日記」），
+   這裡不重複列一份，只檢查名字和數字像不像樣。
+
+   {
+     "version": 1,
+     "days": { "2026-10-23": { "pets": 12, "purr_sec": 95, "toy_laser_sec": 340, ... } }
+   }
+   欄位只會多不會少；外傳讀到不認得的欄位略過、缺的當 0。 */
+
+/// 日記格式的版本：之後改了欄位的意思才加一，只是多了欄位不用改
+const DIARY_VERSION: u32 = 1;
+
+/// 只留最近幾天：外傳看的是最近幾天的累積
+const DIARY_DAYS: usize = 30;
+
+/// 一次最多加多少：前端一分鐘送一次，秒數不會超過 60，次數也不會多到哪去
+const DIARY_MAX_ADD: u64 = 3600;
+
+/// 讀、改、寫一次做完，兩次寫入不會互相蓋掉
+static DIARY_LOCK: Mutex<()> = Mutex::new(());
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Diary {
+    version: u32,
+    /// 日期（YYYY-MM-DD，本地時間）→ 欄位 → 次數或秒數。BTreeMap 照日期排好，剪掉舊的就是剪最前面
+    days: BTreeMap<String, BTreeMap<String, u64>>,
+}
+
+fn diary_path(app: &AppHandle) -> Option<PathBuf> {
+    picture_dir(app).map(|d| d.join("diary.json"))
+}
+
+/// 日期要是 YYYY-MM-DD
+fn valid_day(day: &str) -> bool {
+    let b = day.as_bytes();
+    b.len() == 10
+        && b.iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() })
+}
+
+/// 欄位名稱只收小寫英文、數字、底線
+fn valid_field(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 32 && name.bytes().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_')
+}
+
+/// 前端每分鐘送一次這一分鐘多出來的次數、秒數，加進那一天。
+/// 寫不進去就回傳錯誤，前端會留著下一次再送（例如 OneDrive 正在同步這個檔案）
+#[tauri::command]
+async fn diary_add(app: AppHandle, day: String, add: HashMap<String, u64>) -> Result<(), String> {
+    if !settings_snapshot(&app).diary {
+        return Ok(()); // 剛關掉，還在路上的那一筆不寫
+    }
+    if !valid_day(&day) {
+        return Err(format!("日期不對：{day}"));
+    }
+    if let Some((k, _)) = add.iter().find(|(k, v)| !valid_field(k) || **v > DIARY_MAX_ADD) {
+        return Err(format!("欄位不對：{k}"));
+    }
+    let path = diary_path(&app).ok_or("找不到圖片資料夾")?;
+    let _lock = DIARY_LOCK.lock().map_err(|e| e.to_string())?;
+    // 讀不到或格式壞了就從頭記：日記只是驚喜，不值得因為它開不起來
+    let mut diary: Diary = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    diary.version = DIARY_VERSION;
+    let today = diary.days.entry(day).or_default();
+    for (k, v) in add {
+        let n = today.entry(k).or_default();
+        *n = n.saturating_add(v);
+    }
+    while diary.days.len() > DIARY_DAYS {
+        diary.days.pop_first();
+    }
+    let text = serde_json::to_string_pretty(&diary).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    // 先寫到暫存檔再改名（同 save_settings），外傳剛好在讀也不會讀到寫一半的檔案
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_diary(app: AppHandle, on: bool) {
+    update_settings(&app, |s| s.diary = on);
 }
 
 /* ─── 串門子：區網連線在 link.rs，這裡接上設定和兩個視窗 ───
@@ -857,6 +958,8 @@ fn main() {
             set_furniture,
             list_screens,
             set_screen,
+            diary_add,
+            set_diary,
             open_picture_folder,
             quit_app,
             hide_status,

@@ -65,7 +65,7 @@
 - [x] README「隱私」改寫（商店的隱私權政策也改了，在 `src-tauri/msix/README.md`）：預設不連網；開了「連線」才會在區網廣播電腦名稱，並跟你勾選的那台互傳貓的狀態；不經過伺服器，不傳游標位置和圖片
 - [ ] README 展示加一支串門子的 GIF：`node tools/make-gifs.mjs visit` 會錄到 `docs/visit.gif`
 - [x] 版本號 1.2.0（`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 三個地方）
-- [ ] Release notes
+- [x] Release notes
 
 ## 參考
 

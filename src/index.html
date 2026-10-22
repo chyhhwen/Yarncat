@@ -514,7 +514,7 @@ function boo(toward, scare = true) {                   // 從紙箱蹦出來！�
   cat.dir = Math.sign(toward - box.x) || cat.dir;
   cat.in = 'box'; cat.scare = scare; cat.x = box.x; cat.y = box.y;
   box.shake = 16;
-  if (scare) quake = 12;
+  if (scare) { quake = 12; note('boo'); }
   bang(box.x + cat.dir * 11, box.y - 38);
   setState('boo', scare ? 46 : 10);
 }
@@ -526,7 +526,7 @@ function nextHunt(p, reach) {
   const far = Math.abs(clamp(p.x, 12, W - 12) - cat.x) > 12;   // 比 hunt 停下來的 9 寬一點，差一點點就不起身
   if (reach) return far ? setState('hunt', 600) : setState('aim', FLOOR - p.y > 10 ? rand(8, 20) : rand(12, 30));
   if (cat.bored) return setState('sit', rand(120, 240));
-  if (cat.miss > PATIENCE && Math.random() < 0.5) return setState('flop', rand(300, 600));
+  if (cat.miss > PATIENCE && Math.random() < 0.5) { note('flops'); return setState('flop', rand(300, 600)); }
   if (far) return setState('hunt', 600);               // 先跑到它底下（或畫面邊邊）
   if (Math.random() < 0.4) return setState('loaf', rand(150, 300));
   setState('stare', rand(20, 40));
@@ -740,7 +740,7 @@ function updateCat() {
       if (cat.t % 60 === 30) {
         snack.bites++;
         for (let i = 0; i < 4; i++) puff('crumb', snack.x + rand(-2, 2), FLOOR - 3);
-        if (snack.bites >= 3) { snack = null; cat.energy = Math.min(100, cat.energy + 20); }
+        if (snack.bites >= 3) { snack = null; cat.energy = Math.min(100, cat.energy + 20); note('snacks'); }
       }
       if (cat.t > cat.dur) setState('lick', rand(120, 180));   // 吃完舔舔嘴
       break;
@@ -784,7 +784,7 @@ function updateCat() {
       const side = Math.sign(cat.x - tree.x) || 1;
       if (goTo(tree.x + side * (cat.plan === 'scratch' ? 9 : 20), 0.6)) {
         cat.dir = -side;
-        if (cat.plan === 'scratch') setState('scratch', rand(120, 200)); else climb();
+        if (cat.plan === 'scratch') { setState('scratch', rand(120, 200)); note('scratch'); } else climb();
       } else if (cat.t > cat.dur) setState('sit', 60);
       break;
     }
@@ -839,6 +839,7 @@ function updateCat() {
       if (cat.t > cat.dur) {
         litter.poop.push(clamp(Math.round(cat.x - cat.dir * 9 - litter.x + rand(-2, 2)), -9, 8));   // 便便在尾巴底下
         pooCD = rand(36000, 72000);                    // 下一次 10～20 分鐘後
+        note('litter');
         cat.dir = -cat.dir;                            // 轉過身扒砂蓋起來
         setState('cover', rand(110, 170));
       }
@@ -954,6 +955,7 @@ function updateCat() {
       if (treat.paste <= 0) {                          // 舔完了：心滿意足舔舔嘴
         treat.paste = 0;
         cat.energy = Math.min(100, cat.energy + 25);
+        note('treats');
         for (let i = 0; i < 3; i++) puff('heart', cat.x + cat.dir * rand(-2, 8), cat.y + my - rand(4, 10));
         setState('lick', rand(150, 210));
       }
@@ -1900,13 +1902,13 @@ function stroke(p) {
   rub.x = p.x;
 }
 function pet() {
-  if (cat.state !== 'pet') setState('pet', 180);
+  if (cat.state !== 'pet') { setState('pet', 180); note('pets'); }
   rub.flips = 0;
 }
 function popBubble() {                                 // 點了泡泡
   if (cat.state === 'beg') return pet();
   const b = bubbleBox();
-  if (cat.state === 'dream') { burst(b); return setState('sit', rand(60, 120)); }   // 大泡泡：啵，破掉了
+  if (cat.state === 'dream') { burst(b); note('big_bubbles'); return setState('sit', rand(60, 120)); }   // 大泡泡：啵，破掉了
   if (cat.want === 'treat') { giveTreat((b.x0 + b.x1) / 2, b.y1); return goTreat(); }   // 想舔貓條：從泡泡掉一條下來
   // 想吃妙脆角：從泡泡掉一根下來
   if (!snack) snack = { x: clamp((b.x0 + b.x1) / 2, 6, W - 6), y: b.y1, vy: 0, landed: false, bites: 0 };
@@ -2243,6 +2245,8 @@ function applySettings(s) {                            // 開機時讀一次；�
   if (COATS[s.coat]) { myCoat = s.coat; coatPicked = true; }
   const f = s.furniture || {};
   for (const k of Object.keys(FURN)) if (typeof f[k] === 'boolean') setFurniture(k, f[k]);
+  diaryOn = s.diary !== false;
+  if (!diaryOn) for (const k of Object.keys(diary)) delete diary[k];   // 關掉了：還沒寫進去的也不要了
 }
 function doing() {                                     // 貓現在在做什麼
   const prey = { ball: '毛球', laser: '紅點', wand: '羽毛' }[toy];
@@ -2289,6 +2293,45 @@ if (TAURI) {
   TAURI.core.invoke('get_settings').then(applySettings).catch(() => {});
 }
 
+/* ═══ 貓咪日記（桌寵版）：外傳「午睡夢遊記」讀它，讓白天玩了什麼影響晚上的夢 ═══
+   只記次數和時間，不記游標、不記圖片。這裡先累積，每分鐘把多出來的交給 Rust 加進
+   圖片\YarnCat\diary.json（main.rs 的 diary_add）；狀態視窗「系統」可以關掉。
+   欄位（_sec 結尾的是秒數，這裡先用格數記，送出去時才換成秒）：
+   toy_ball_sec、toy_laser_sec、toy_wand_sec 跟毛球／雷射光／逗貓棒玩了多久，pets 被摸幾次、purr_sec 呼嚕多久，
+   snacks 吃完幾根零食、treats 舔完幾條貓條，big_bubbles 點破幾個大泡泡，quiet_sec 安靜模式多久，
+   litter 上幾次廁所、scratch 磨幾次爪、boo 躲紙箱嚇人幾次，flops 搆不到翻肚放棄幾次。
+   之後要加欄位直接加；改了欄位的意思才要改 main.rs 的 DIARY_VERSION。 */
+let diaryOn = false;                                   // 等設定讀進來才知道（見 applySettings）
+const diary = {};                                      // 還沒寫進去的
+let diaryBusy = false;                                 // 上一次還沒寫完就不再送
+const PLAYING = ['stare', 'chase', 'crouch', 'pounce', 'swipe', 'hunt', 'aim', 'leap', 'clutch', 'slap', 'loaf'];   // 算在「玩玩具」的狀態
+function note(k, n = 1) { if (diaryOn) diary[k] = (diary[k] || 0) + n; }
+function diaryTick() {                                 // 每格：在玩哪個玩具、在呼嚕、安靜模式，各記一格
+  if (!diaryOn || cat.state === 'away') return;        // 去隔壁作客時在別人家玩，不算
+  if (PLAYING.includes(cat.state) && !cat.perch) note(`toy_${toy}_sec`);
+  if (cat.state === 'pet') note('purr_sec');
+  if (quiet) note('quiet_sec');
+}
+function today() {                                     // 本地時間的 YYYY-MM-DD
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}`;
+}
+function diaryFlush() {
+  if (!TAURI || !diaryOn || diaryBusy) return;
+  const add = {};
+  for (const [k, v] of Object.entries(diary)) {
+    const n = k.endsWith('_sec') ? Math.floor(v / 60) : v;   // 不滿一秒的留著，下次再送
+    if (n > 0) add[k] = n;
+  }
+  if (!Object.keys(add).length) return;
+  diaryBusy = true;
+  TAURI.core.invoke('diary_add', { day: today(), add })
+    .then(() => { for (const [k, n] of Object.entries(add)) diary[k] -= k.endsWith('_sec') ? n * 60 : n; })
+    .catch(() => {})                                   // 寫不進去（例如 OneDrive 正在同步）：留著下一分鐘再送
+    .finally(() => { diaryBusy = false; });
+}
+if (TAURI) setInterval(diaryFlush, 60000);
+
 /* ═══ 遊戲迴圈：固定每秒 60 次更新，畫面跟著螢幕刷新 ═══ */
 let acc = 0, lastT = performance.now();
 function frame(now) {
@@ -2302,6 +2345,7 @@ function frame(now) {
     linkTick();
     updateFurniture();
     updateFx();
+    diaryTick();
     acc -= 1000 / 60;
   }
   ctx.clearRect(0, 0, W, H);

@@ -71,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File src-tauri\msix\build.ps1
 **runFullTrust 的理由**（Submission options 頁。有人遇過這欄超過字數會被截掉，所以重點放在最前面）：
 
 ```
-Win32 desktop pet (Tauri + WebView2) packaged as MSIX, not UWP. Full trust is needed for its transparent, always-on-top, click-through window above the taskbar, its tray menu, reading the cursor position so the cat can chase toys, and reading images from Pictures\YarnCat.
+Win32 desktop pet (Tauri + WebView2) packaged as MSIX, not UWP. Full trust is needed for its transparent, always-on-top, click-through window above the taskbar, its tray menu, reading the cursor position so the cat can chase toys, and reading images from (and writing a small local diary file to) Pictures\YarnCat.
 ```
 
 **Notes for certification**（貼在「Additional Testing Information」頁。毛球貓沒有一般的視窗，要告訴審核人員去哪裡找）：
@@ -80,7 +80,7 @@ Win32 desktop pet (Tauri + WebView2) packaged as MSIX, not UWP. Full trust is ne
 YarnCat has no regular window or taskbar button. After launch, a pixel cat appears at the bottom of the primary screen, just above the taskbar. Left-click the cat icon in the system tray to open a small status window (status, coat, furniture, screen, link, system); right-click it for toys, treats, quiet mode and quit. On Windows 11 the icon may be hidden under the ^ overflow. Drag the cat or the yarn ball with the mouse to play. Networking is off by default: only if the user turns on the "連線" (Link) tab does the app use the local network (UDP/TCP port 52525) to find another YarnCat on the same LAN and exchange the cats' state with the computer the user paired with. It never contacts internet servers.
 ```
 
-**隱私權政策**（Partner Center 規定一定要有，這次選「Provide privacy policy text」直接貼文字。這份只存在 Partner Center，要改的時候這裡也一起改。1.2.0 加了串門子，送 1.2.0 審核時要把 Partner Center 上的舊版換成下面這份）：
+**隱私權政策**（Partner Center 規定一定要有，這次選「Provide privacy policy text」直接貼文字。這份只存在 Partner Center，要改的時候這裡也一起改。1.2.0 加了串門子，送 1.2.0 審核時要把 Partner Center 上的舊版換成下面這份；之後加了貓咪日記，下一版送審時也要換）：
 
 ```
 毛球貓 YarnCat 隱私權政策
@@ -90,12 +90,13 @@ YarnCat has no regular window or taskbar button. After launch, a pixel cat appea
 ・程式裡沒有統計、廣告或自動更新功能。
 ・串門子的「連線」預設關閉。打開之後，毛球貓才會在區網上廣播這台的電腦名稱，讓同一個區網裡的毛球貓找得到；並跟你勾選的那台電腦直接互傳貓的狀態（毛色、安靜模式、貓在誰家、體力），不經過任何伺服器，不傳游標位置和圖片。關掉就停止。
 ・設定（毛色、家具、螢幕、連線設定，包括這台電腦的隨機代號）只存在你的電腦上。
+・只在你的電腦上記錄貓咪日記，不會傳到任何地方，可以在狀態視窗的「系統」分頁關掉。日記放在「圖片\YarnCat\diary.json」，只記每天的次數和時間（例如玩了多久玩具、摸了幾次），留最近 30 天。
 ・游標位置只用來讓貓追玩具、判斷你有沒有點到貓，不會記錄下來。
 ・「圖片\YarnCat」資料夾裡的圖片只在你的電腦上讀取、畫在泡泡裡，不會傳到任何地方。
 ・畫面由 Windows 的 Microsoft Edge WebView2 元件顯示。這個元件，以及從 Microsoft Store 下載、更新毛球貓的過程，由微軟依照微軟隱私權聲明處理。
 
 有問題請到 https://github.com/chyhhwen/Yarncat/issues 回報。
-最後更新：2026 年 10 月 20 日
+最後更新：2026 年 10 月 23 日
 
 YarnCat Privacy Policy
 
@@ -104,12 +105,13 @@ YarnCat does not connect to the internet and does not send any personal informat
 - The app has no analytics, ads, or automatic updates of its own.
 - The "Link" feature (cats visiting each other) is off by default. Only after you turn it on does YarnCat broadcast this computer's name on your local network so other copies of YarnCat on the same network can find it, and exchange the cats' state (coat, quiet mode, which home the cat is in, energy) directly with the computer you paired with. No server is involved, and the cursor position and images are never sent. Turning it off stops it.
 - Settings (coat, furniture, screen, and link settings, including a random ID for this computer) are stored only on your computer.
+- The cat diary is recorded only on your computer and never sent anywhere. You can turn it off in the status window's "系統" (System) tab. It is stored in Pictures\YarnCat\diary.json and contains only daily counts and durations (for example, how long the cat played with each toy and how many times it was petted), kept for the last 30 days.
 - The cursor position is used only to let the cat chase toys and to detect clicks on the cat. It is never recorded.
 - Images in the Pictures\YarnCat folder are read only on your computer to show them in the cat's bubbles. They are never sent anywhere.
 - The app is displayed with Microsoft Edge WebView2, a Windows component. That component, and downloading and updating YarnCat through the Microsoft Store, are handled by Microsoft under the Microsoft Privacy Statement.
 
 Questions: https://github.com/chyhhwen/Yarncat/issues
-Last updated: October 20, 2026
+Last updated: October 23, 2026
 ```
 
 商店頁另外要準備：

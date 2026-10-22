@@ -247,6 +247,10 @@
 
     <section id="tab-system" hidden>
       <h2>系統</h2>
+      <div class="row">
+        <div><b>記錄貓咪日記</b><small id="diary-path">只記次數和時間，存在圖片\YarnCat</small></div>
+        <button type="button" class="switch" id="diary-on" aria-label="記錄貓咪日記" aria-pressed="true"></button>
+      </div>
       <button type="button" class="action" id="open-pictures">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
         <span><b>打開泡泡圖片資料夾</b><small id="pictures-path">圖片\YarnCat</small></span>
@@ -269,7 +273,7 @@ const TAURI = window.__TAURI__;
 const $ = id => document.getElementById(id);
 const TABS = { status: '狀態', coat: '毛色', furn: '家具', screen: '螢幕', link: '連線', system: '系統' };
 const SCALE = 3;                                       // 貓的小圖放大幾倍（跟桌面上一樣大；最寬的飛撲 35 格 × 3 剛好塞得進框）
-let settings = { coat: null, furniture: { litter: true, tree: true, box: true }, screen: null, link: { on: false, ips: [] } };
+let settings = { coat: null, furniture: { litter: true, tree: true, box: true }, screen: null, link: { on: false, ips: [] }, diary: true };
 let catCoat = 'gray';                                  // 貓現在的毛色（沒選過時是預設的藍灰）
 let coats = [];                                        // 毛色選單：[{ id, name, picture }]
 let screens = [];                                      // [{ key, label, chosen }]
@@ -449,7 +453,11 @@ $('ip-form').addEventListener('submit', e => {
 });
 
 /* ─── 系統 ─── */
-if (/Mac/.test(navigator.platform)) $('pictures-path').textContent = '~/Pictures/YarnCat';
+if (/Mac/.test(navigator.platform)) {
+  $('pictures-path').textContent = '~/Pictures/YarnCat';
+  $('diary-path').textContent = '只記次數和時間，存在 ~/Pictures/YarnCat';
+}
+$('diary-on').addEventListener('click', () => call('set_diary', { on: settings.diary === false }));
 $('open-pictures').addEventListener('click', () => call('open_picture_folder'));
 $('quit').addEventListener('click', () => call('quit_app'));
 if (TAURI && TAURI.app) TAURI.app.getVersion().then(v => { $('version').textContent = '版本 ' + v; }).catch(() => {});
@@ -457,6 +465,7 @@ if (TAURI && TAURI.app) TAURI.app.getVersion().then(v => { $('version').textCont
 /* ─── 設定 ─── */
 function renderSettings() {
   for (const b of document.querySelectorAll('[data-furn]')) b.setAttribute('aria-pressed', String(settings.furniture[b.dataset.furn] !== false));
+  $('diary-on').setAttribute('aria-pressed', String(settings.diary !== false));
   renderCoats();
   renderLink();                                        // 手動輸入的 IP 存在設定裡
 }
@@ -490,6 +499,7 @@ function fake(cmd, args) {                             // 瀏覽器版的假 Rus
     ];
     case 'set_coat': settings.coat = args.coat; renderSettings(); return;
     case 'set_furniture': settings.furniture[args.name] = args.on; renderSettings(); return;
+    case 'set_diary': settings.diary = args.on; renderSettings(); return;
     case 'set_screen': screens = screens.map(s => ({ ...s, chosen: s.key === args.key })); return;
     case 'link_status': return link.peers.length ? link : {
       on: true, name: 'DESKTOP-HOST', ips: ['192.168.62.1', '192.168.50.232'], error: null, side: 1,
