@@ -898,15 +898,20 @@ fn toggle_status_window(app: &AppHandle, rect: tauri::Rect) {
 
 /// 打開狀態視窗；從選單打開時沒有圖示位置，擺在游標旁邊
 fn show_status_window(app: &AppHandle, anchor: Option<tauri::Rect>) {
-    let win = match app.get_webview_window("status") {
-        Some(w) => w,
+    let (win, fresh) = match app.get_webview_window("status") {
+        Some(w) => (w, false),
         None => match build_status_window(app) {
-            Ok(w) => w,
+            Ok(w) => (w, true),
             Err(_) => return,
         },
     };
     place_status_window(app, &win, anchor);
     let _ = win.show();
+    // 剛建好、還沒顯示過的視窗，Windows 還沒算好無邊框陰影的外框，
+    // 上面擺的位置和大小會偏掉（第一次打開會太下面）。顯示後再擺一次，跟之後每次打開一樣
+    if fresh {
+        place_status_window(app, &win, anchor);
+    }
     let _ = win.set_focus();
     let _ = app.emit_to("status", "status-shown", ());
     let _ = app.emit_to("main", "status-visible", true);

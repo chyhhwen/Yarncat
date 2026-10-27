@@ -219,7 +219,7 @@ function updateFurniture() {
   }
   if (tree.on) {
     if (settle(tree, HALF.tree, 0.8, TOP.tree)) thud(tree.x, 11);
-    pom[0].x = tree.x + 11; pom[0].y = tree.y - 16;
+    pom[0].x = pomX(); pom[0].y = tree.y - 16;
     stepRope(pom, 2);
   }
   if (box.on) {
@@ -248,7 +248,7 @@ function updateFurniture() {
 
 function initPom() {
   pom.length = 0;
-  for (let i = 0; i < 5; i++) { const x = tree.x + 11, y = tree.y - 16 + i * 2; pom.push({ x, y, px: x, py: y }); }
+  for (let i = 0; i < 5; i++) { const x = pomX(), y = tree.y - 16 + i * 2; pom.push({ x, y, px: x, py: y }); }
 }
 
 function tipLitter() {                                 // 貓砂盆翻倒：倒扣在地上，貓砂灑一地，便便噴出來
@@ -444,8 +444,14 @@ function goTree(plan = Math.random() < 0.35 ? 'scratch' : 'climb') {   // 去貓
   cat.plan = plan;
   setState('toTree', trek(0.6));
 }
-// 撥小毛球時坐在哪：貓跳台右邊，前掌剛好搆到平台邊垂下來的小毛球。貓跳台沒擺好（拎著、還沒落地、收起來）或頂著畫面右邊沒地方坐，就是 null
-const pomSpot = () => treeReady() && tree.x + 21 <= W - 12 ? tree.x + 21 : null;
+// 小毛球垂在平台哪一邊：平常在右邊；貓跳台頂著畫面右邊、右邊沒地方坐，就換到左邊（平台畫在 -13～+12，左右對稱是 +11／-12）
+const pomSide = () => tree.x + 21 <= W - 12 ? 1 : -1;
+const pomX = () => tree.x + (pomSide() > 0 ? 11 : -12);
+// 撥小毛球時坐在哪：小毛球那一邊，前掌剛好搆到垂下來的小毛球。貓跳台沒擺好（拎著、還沒落地、收起來）或那邊沒地方坐，就是 null
+const pomSpot = () => {
+  const at = tree.x + (pomSide() > 0 ? 21 : -22);
+  return treeReady() && at >= 12 && at <= W - 12 ? at : null;
+};
 function goPom() {                                     // 點貓跳台、小毛球晃起來：貓跑過來撥（正在磨爪也會分心）
   if (cat.state === 'pom') { cat.dur = Math.max(cat.dur, cat.t + 300); return; }   // 正在玩：再多玩一會兒
   if (quiet || cat.energy < 20 || cat.state === 'toPom' || pomSpot() === null) return;
@@ -658,18 +664,21 @@ function updateCat() {
       else if (cat.t > cat.dur) leap(p);
       break;
 
-    case 'leap':
+    case 'leap': {
       cat.vy += G; cat.x += cat.vx; cat.y += cat.vy;
+      const landed = cat.y >= FLOOR;
+      if (landed) cat.y = FLOOR;                       // 先貼回地板：落地那一格剛好抓到羽毛時，才不會往下多畫一格
       if (!cat.got && pawHit(p)) {
         cat.got = true;
         if (toy === 'wand') { setState('clutch', rand(60, 150)); break; }
       }
-      if (cat.y >= FLOOR) {
-        cat.y = FLOOR; cat.vx = cat.vy = 0;
+      if (landed) {
+        cat.vx = cat.vy = 0;
         if (toy === 'laser') setState('slap', 36);    // 雷射光抓不到：落地後按著地板，看看掌心底下有沒有
         else setState('stare', rand(10, 25));
       }
       break;
+    }
 
     case 'clutch': {                                   // 抓住羽毛，被逗貓棒吊著晃
       cat.low = p.y > FLOOR - 14;
@@ -795,12 +804,12 @@ function updateCat() {
       if (cat.t > cat.dur) !quiet && Math.random() < 0.6 ? climb() : setState('lick', rand(90, 150));
       break;
 
-    case 'toPom': {                                    // 小毛球晃起來了：跑到貓跳台右邊
+    case 'toPom': {                                    // 小毛球晃起來了：跑到貓跳台旁邊小毛球那一邊
       if (wantTreat()) { goTreat(); break; }
       const at = pomSpot();
       if (at === null) setState('sit', 60);            // 貓跳台被拿走了
       else if (goTo(at, 1.1)) {                        // 坐下來面向小毛球；不管是被點過來還是自己來的，都要再過 4～8 分鐘才會自己想撥
-        cat.dir = -1; cat.paw = 0; pomCD = rand(14400, 28800);
+        cat.dir = -pomSide(); cat.paw = 0; pomCD = rand(14400, 28800);
         setState('pom', rand(300, 600));
       }
       else if (cat.t > cat.dur) setState('sit', 60);
@@ -1984,7 +1993,7 @@ function endDrag(e) {
     if (click && k === 'poo') scoopAt(o.x, o.y, o);    // 點一下便便：直接鏟掉
     else if (click && k === 'litter') litter.tipped ? rightLitter() : scoopLitter(toWorld(e).x);   // 點一下貓砂盆：鏟便便；翻倒了就翻回來
     else if (click && k === 'box') box.shake = 10;
-    else if (click && k === 'tree') { pom[pom.length - 1].px -= 1.5; goPom(); }   // 撥一下小毛球，貓看到會跑過來玩
+    else if (click && k === 'tree') { pom[pom.length - 1].px -= 1.5 * pomSide(); goPom(); }   // 撥一下小毛球，貓看到會跑過來玩
     else { o.vx = clamp(vx, -4, 4); o.vy = clamp(vy, -4, 4); }
   }
   drag = null;
