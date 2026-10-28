@@ -82,7 +82,9 @@
     background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5 10 17 19 7'/%3E%3C/svg%3E") center / 12px no-repeat;
   }
 
-  /* 家具 */
+  /* 家具（DLC 加了家具，排不下就捲，不要把開關壓扁） */
+  #tab-furn { overflow-y: auto; }
+  #tab-furn > * { flex-shrink: 0; }
   .rows { display: flex; flex-direction: column; }
   .row { display: flex; align-items: center; gap: 8px; min-height: 52px; border-bottom: 1px solid rgba(38, 37, 48, 0.08); }
   .row:last-child { border-bottom: 0; }
@@ -212,7 +214,7 @@
     <section id="tab-furn" hidden>
       <h2>家具</h2>
       <p class="hint">收起來的會記住。</p>
-      <div class="rows">
+      <div class="rows" id="furniture">
         <div class="row"><div><b>貓砂盆</b><small>會自己去上廁所</small></div><button type="button" class="switch" data-furn="litter" aria-label="貓砂盆" aria-pressed="true"></button></div>
         <div class="row"><div><b>貓跳台</b><small>磨爪、跳上去睡覺</small></div><button type="button" class="switch" data-furn="tree" aria-label="貓跳台" aria-pressed="true"></button></div>
         <div class="row"><div><b>紙箱</b><small>躲進去嚇你</small></div><button type="button" class="switch" data-furn="box" aria-label="紙箱" aria-pressed="true"></button></div>
@@ -276,7 +278,7 @@
 <script>
 /* 資料從哪來：
    - 設定（毛色、家具、螢幕、連線）：Rust 的 get_settings；改了會收到 settings 事件
-   - 貓現在的樣子：貓的視窗（index.html）在這個視窗開著時每半秒送一次 cat-status（載入了哪些 DLC 也在裡面）
+   - 貓現在的樣子：貓的視窗（index.html）在這個視窗開著時每半秒送一次 cat-status（載入了哪些 DLC、DLC 加的家具也在裡面）
    - 毛色選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards 過來（DLC 的毛色也有）
    - 連線：找到的電腦、連上沒，Rust 的 link_status；有變會收到 link-status 事件 */
 const TAURI = window.__TAURI__;
@@ -346,6 +348,7 @@ function renderStatus(s) {
   catAway = !!s.away; catCanVisit = !!s.canVisit;
   renderGo();
   renderDlc(s.dlc || []);
+  renderFurn(s.furn || []);
 }
 
 /* ─── 毛色 ─── */
@@ -372,9 +375,36 @@ function renderCoats() {
   }));
 }
 
-/* ─── 家具 ─── */
-for (const b of document.querySelectorAll('[data-furn]')) {
-  b.addEventListener('click', () => call('set_furniture', { name: b.dataset.furn, on: settings.furniture[b.dataset.furn] === false }));
+/* ─── 家具：貓砂盆、貓跳台、紙箱，後面接著 DLC 加的（貓的視窗在 cat-status 裡送來） ─── */
+$('furniture').addEventListener('click', e => {
+  const b = e.target.closest('[data-furn]');
+  if (b) call('set_furniture', { name: b.dataset.furn, on: settings.furniture[b.dataset.furn] === false });
+});
+let lastFurn = '';
+function renderFurn(list) {                            // DLC 加的家具：每半秒送一次，沒變就不動
+  const key = JSON.stringify(list);
+  if (key === lastFurn) return;
+  lastFurn = key;
+  for (const row of document.querySelectorAll('[data-dlc-furn]')) row.remove();
+  $('furniture').append(...list.map(f => {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.dataset.dlcFurn = '';
+    const text = document.createElement('div');
+    const name = document.createElement('b');
+    name.textContent = f.name;
+    const desc = document.createElement('small');
+    desc.textContent = f.desc;
+    text.append(name, desc);
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'switch';
+    b.dataset.furn = f.id;
+    b.setAttribute('aria-label', f.name);
+    b.setAttribute('aria-pressed', String(settings.furniture[f.id] !== false));
+    row.append(text, b);
+    return row;
+  }));
 }
 
 /* ─── 螢幕 ─── */
@@ -516,7 +546,9 @@ if (TAURI) {
 } else {
   coats = [{ id: 'gray', name: '藍灰虎斑' }, { id: 'orange', name: '橘貓' }, { id: 'tuxedo', name: '黑白賓士' }, { id: 'boss', name: '老大' }, { id: 'gym', name: '健身' }];
   renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', toy: '毛球', picture: null, away: false, canVisit: true,
-    dlc: [{ file: 'boss-gym.yarncat', names: ['老大', '健身'], error: '' }] });
+    dlc: [{ file: 'boss-gym.yarncat', names: ['老大', '健身'], error: '' }],
+    furn: [{ id: 'bench', name: '臥推椅', desc: '躺上去推槓鈴' }, { id: 'mill', name: '跑步機', desc: '原地跑步，點一下加速' },
+      { id: 'lat', name: '高拉背機', desc: '往下拉，點一下加重量' }] });
 }
 loadSettings();
 loadScreens();

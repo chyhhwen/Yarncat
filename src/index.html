@@ -62,7 +62,7 @@ function resize() {
   else if (S !== oldS) { mouse.x *= oldS / S; mouse.y *= oldS / S; }
   if (S !== oldS) {                                    // 倍率變了：維持在螢幕上的同一個位置
     cat.x *= oldS / S; ball.x *= oldS / S; ball.y *= oldS / S;
-    for (const o of [litter, tree, box, ...poos, ...litter.spill]) o.x *= oldS / S;
+    for (const o of [...Object.values(FURN), ...poos, ...litter.spill]) o.x *= oldS / S;   // 家具連 DLC 加的一起
     if (treat) treat.x *= oldS / S;
     if (guest) guest.x *= oldS / S;
     initRope(); initWand(); initPom();
@@ -76,12 +76,12 @@ function resize() {
     snack.x = clamp(snack.x, 6, W - 6);
     if (snack.landed) snack.y = FLOOR;
   }
-  for (const [o, half] of [[litter, HALF.litter], [tree, HALF.tree], [box, HALF.box], ...poos.map(q => [q, 3])]) {
+  for (const [o, half] of [...Object.keys(FURN).map(k => [FURN[k], HALF[k]]), ...poos.map(q => [q, 3])]) {
     o.x = clamp(o.x, half, W - half);                  // 家具、便便也一樣：原本在地上就繼續在地上
     if (!o.held) o.y = o.y >= oldFloor ? FLOOR : Math.min(o.y, FLOOR);
   }
   if (treat) { treat.x = clamp(treat.x, 3, W - 3); if (treat.landed) treat.y = FLOOR; }
-  hook('resize', oldS);                                // 角色的專屬東西（老大貓的魚乾、健身器材，見「角色」）
+  hook('resize', oldS);                                // 角色的專屬東西（老大貓的魚乾，見「角色」）
   if (cat.perch) cat.y = tree.y - PERCH;               // 站在貓跳台上、蹲在貓砂盆裡的，跟著家具的新高度
   else if (cat.in === 'litter' && ['squat', 'cover'].includes(cat.state)) cat.y = litter.y - 5;
 }
@@ -176,7 +176,7 @@ function updateWand() {
 }
 
 /* ═══ 家具：貓砂盆、貓跳台、紙箱 ═══
-   都擺在地上，可以拖去別的地方，拎高放開會掉下來（系統匣「家具」可以個別收起來）。
+   都擺在地上，可以拖去別的地方，拎高放開會掉下來（狀態視窗「家具」可以個別收起來）。DLC 也能加家具，見「DLC 家具」。
    x 是正中間，y 是底邊。貓砂盆、紙箱分成後面、前面兩半畫，貓進去時夾在中間。 */
 const litter = { on: true, x: 0, y: 0, vx: 0, vy: 0, held: false, tipped: false, poop: [], spill: [] };   // poop：盆裡每一坨在哪（相對 x）；spill：翻倒時灑在地上的貓砂
 const tree   = { on: true, x: 0, y: 0, vx: 0, vy: 0, held: false };
@@ -227,6 +227,8 @@ function updateFurniture() {
     if (settle(box, HALF.box, 0.8, TOP.box)) thud(box.x, 12);
     box.shake = Math.max(0, box.shake - 1);
   }
+  for (const [k, o] of Object.entries(FURN))           // DLC 的家具
+    if (o.on && !BASE_FURN.has(k) && settle(o, HALF[k], 0.8, TOP[k])) thud(o.x, HALF[k] - 1);
   for (let i = poos.length - 1; i >= 0; i--) {
     const q = poos[i], y0 = q.y;
     settle(q, 3, 0.75, 6);
@@ -412,7 +414,7 @@ function nextIdle() {                                  // 閒著的時候要做�
   if (!treeCD && treeReady()) { treeCD = rand(7200, 18000); return goTree(); }               // 去貓跳台；下一次 2～5 分鐘後
   if (!pomCD && pomSpot() !== null) return setState('toPom', trek(1.1));   // 自己跑去撥小毛球（坐下來開始撥才重新計時）
   if (!visitCD && canVisit()) return setState('leave', trek(0.6));         // 去隔壁串門子（回到家才重新計時）
-  if (hook('idle')) return;                            // 角色的專屬動作（老大貓巡視、健身貓去練……）
+  if (hook('idle') || furnAsk('idle')) return;         // 角色的專屬動作（老大貓巡視……）、去用 DLC 的家具（健身器材……）
   const r = Math.random();
   if (r < (toy === 'ball' ? 0.45 : 0.7) && cat.energy > 30) return setState('stare', rand(40, 90));
   if (r < 0.65) return setState('lick', rand(90, 150));
@@ -1007,7 +1009,7 @@ function updateCat() {
       if (cat.t % 40 === 20) puff('heart', (cat.x + guest.x) / 2 - 1, cat.y - 16);
       break;
   }
-  charStep();                                          // 角色的專屬狀態；換了毛色就把上一個角色的東西收掉
+  charStep();                                          // 角色、DLC 家具的專屬狀態；換了毛色就把上一個角色的東西收掉
   if (!['leave', 'away', 'arrive'].includes(cat.state)) cat.x = clamp(cat.x, 12, W - 12);   // 出門、回家時會走到畫面外
   cat.energy = clamp(cat.energy, 0, 100);
 }
@@ -1311,7 +1313,7 @@ function treatPose(f) {                                // 貓條：跑過去、�
 const onBack = () => cat.state === 'flop' && cat.t >= ROLL && cat.t <= cat.dur - ROLL;   // 翻好肚了（不是正在躺下或翻回來）
 function currentPose() {
   const f = cat.frame;
-  const own = hook('pose', f);                         // 角色的專屬狀態
+  const own = ownPose(f);                              // 角色、DLC 家具的專屬狀態
   if (own) return own;
   switch (cat.state) {
     case 'loaf': return loafPose(f, cat.up);
@@ -1364,11 +1366,13 @@ function drawRects(ox, oy, parts, det, dir = 1, pal = C, g = ctx) {
 function drawCat() {
   if (cat.state === 'away') return;                    // 在隔壁作客
   const [parts, det, over] = look(currentPose(), myCoat, 'cat');   // 角色外觀；over：畫在貓前面的一層（老大貓嘴上的魚乾……）
+  const held = furnAsk('over');                        // 用著的 DLC 家具也有畫在貓前面的一層（舉著的槓鈴……）
   const run = ['chase', 'hunt', 'fetch', 'zoom', 'toPom'].includes(cat.state) || (cat.state === 'treat' && cat.lv === -2);
   const ox = Math.round(cat.x) + (cat.state === 'squat' && cat.t % 8 < 4 ? 1 : 0);   // 用力到發抖
   const oy = Math.round(cat.y) - (run && cat.frame % 2 ? 1 : 0);
   drawRects(ox, oy, parts, det, cat.dir, coatPal(myCoat));
   if (over) drawRects(ox, oy, over[0], over[1], cat.dir, coatPal(myCoat));
+  if (held) drawRects(ox, oy, held[0], held[1], cat.dir, coatPal(myCoat));
   if (cat.state === 'treat') drawTongue(ox, oy);
   if (cat.state === 'sleep') drawZ(ox + cat.dir * 8, oy - 14);
   if (onBack() && cat.energy >= 30) drawStars(ox + cat.dir * 9, oy - 14);
@@ -1778,7 +1782,7 @@ function drawScoop() {                                 // 貓砂鏟：插下去�
 /* ═══ 點擊判定：滑鼠在貓或球上嗎？（Windows 版用同一個函式切換穿透） ═══ */
 function catBox() {
   const x = cat.x, y = cat.y;
-  const own = hook('box');                             // 角色的專屬狀態
+  const own = hook('box') || furnAsk('box');           // 角色、DLC 家具的專屬狀態
   if (own) return own;
   switch (cat.state) {
     case 'sleep': return { x0: x - 12, y0: y - 14, x1: x + 12, y1: y + 1 };
@@ -1832,7 +1836,8 @@ function hitTest(p) {
   if (litter.on && inBox(p, litterHit())) return 'litter';
   if (box.on && inBox(p, boxHit())) return 'box';
   if (tree.on && treeHit(p)) return 'tree';
-  return hook('hitBack', p) || null;                   // 角色的東西，比家具後面（健身器材）
+  for (const k of furnOn()) if (furnCall(k, 'hit', p)) return k;   // DLC 的家具墊在主程式的家具後面
+  return hook('hitBack', p) || null;                   // 角色的東西，比家具後面
 }
 
 /* ═══ 點擊穿透（只有在桌寵視窗裡才有作用） ═══
@@ -1872,7 +1877,7 @@ if (TAURI) {
   document.body.classList.add('browser');
   // 瀏覽器測試用：按 1 毛球、2 雷射光、3 逗貓棒；4 討摸泡泡、5 想吃零食的泡泡、6 大泡泡（要先拖圖片進來）；
   // 7 掉一條貓條；8 想上廁所、9 想躲紙箱、0 想去貓跳台、v 想去隔壁串門子（閒著的話馬上去）；c 換毛色
-  // 開兩個並排的視窗就互為隔壁（見「串門子」）。DLC 的角色另外有自己的按鍵（角色的 key）
+  // 開兩個並排的視窗就互為隔壁（見「串門子」）。DLC 的角色、家具另外有自己的按鍵（它們的 key）
   window.addEventListener('keydown', e => {
     const t = { 1: 'ball', 2: 'laser', 3: 'wand' }[e.key];
     if (t) setToy(t);
@@ -1883,7 +1888,7 @@ if (TAURI) {
     if (e.key === 'c') nextCoat();
     const urge = { 8: () => pooCD = 0, 9: () => boxCD = 0, 0: () => treeCD = 0, v: () => visitCD = 0 }[e.key];
     if (urge) { urge(); if (['sit', 'lick', 'walk', 'stare', 'rest'].includes(cat.state)) nextIdle(); }
-    if (['sit', 'lick', 'walk', 'stare', 'rest'].includes(cat.state) && !cat.perch) hook('key', e.key);   // 閒著的時候才有用
+    if (['sit', 'lick', 'walk', 'stare', 'rest'].includes(cat.state) && !cat.perch) { hook('key', e.key); furnEach('key', e.key); }   // 閒著的時候才有用
   });
   // 網頁版沒有圖片資料夾：把圖片拖進視窗，大泡泡就從這些圖片裡挑（重新整理就要再拖一次）。
   // 拖進來的是 .yarncat 就是 DLC（見「DLC」）
@@ -1955,7 +1960,7 @@ window.addEventListener('pointerdown', e => {
   if (kind === 'guest') { petGuest(); return; }        // 點一下客人：瞇眼呼嚕
   if (kind === 'box' && cat.state === 'hide') { if (!quiet) boo(p.x); return; }   // 碰到躲著貓的紙箱：蹦出來嚇你
   hook('grab', kind, p);                               // 角色的東西被抓起來那一刻（從老大貓嘴上抽走魚乾……）
-  const obj = { cat, ball, treat, poo: pooAt(p), litter, tree, box }[kind] || hook('obj', kind);
+  const obj = { cat, ball, treat, poo: pooAt(p), litter, tree, box }[kind] || FURN[kind] || hook('obj', kind);
   if (!obj) return;
   drag = { kind, obj, id: e.pointerId, hist: [], ox: obj.x - p.x, oy: obj.y - p.y, x0: p.x, y0: p.y, t0: performance.now(), moved: 0 };
   try { cv.setPointerCapture(e.pointerId); } catch (_) {}
@@ -2011,7 +2016,7 @@ function endDrag(e) {
     else if (click && k === 'litter') litter.tipped ? rightLitter() : scoopLitter(toWorld(e).x);   // 點一下貓砂盆：鏟便便；翻倒了就翻回來
     else if (click && k === 'box') box.shake = 10;
     else if (click && k === 'tree') { pom[pom.length - 1].px -= 1.5 * pomSide(); goPom(); }   // 撥一下小毛球，貓看到會跑過來玩
-    else if (click && hook('click', k)) {}             // 點一下角色的東西（健身器材：叫牠來練）
+    else if (click && (furnCall(k, 'click') || hook('click', k))) {}   // 點一下 DLC 的家具（健身器材：叫貓來練）、角色的東西
     else { o.vx = clamp(vx, -4, 4); o.vy = clamp(vy, -4, 4); }
   }
   drag = null;
@@ -2040,6 +2045,7 @@ function setFurniture(name, on) {                      // 狀態視窗的「家�
   if (on) return;
   if (name === 'litter') { litter.tipped = false; litter.spill = []; }   // 翻倒的盆子收起來，下次擺出來就是立好的
   if (cat.in === name || (name === 'tree' && cat.perch)) tumble();   // 貓在裡面、上面：掉回地上
+  furnCall(name, 'off');                               // DLC 的家具：收起來的那一刻要做的事
 }
 
 function setToy(t) {                                   // 系統匣的「玩具」
@@ -2291,14 +2297,16 @@ function doing() {                                     // 貓現在在做什麼
 // 照姿勢畫一張貓的小圖（不含家具、毛球），回傳 data URL。who：'cat' 自己家的貓（狀態視窗）、'card' 毛色選單（見「角色」的 dress）
 function catPicture(coat = myCoat, pose = currentPose(), who = 'cat') {
   const [parts, det, over] = look(pose, coat, who);
-  const [overParts, overDet] = over || [[], []];       // 角色畫在貓前面的那層（叼著的魚乾……）
+  // 一層一層畫：貓、角色畫在貓前面的那層（叼著的魚乾……）、自己家的貓用著的 DLC 家具的那層（舉著的槓鈴……）
+  const layers = [[parts, det], over, who === 'cat' && furnAsk('over')].filter(Boolean);
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-  for (const [x, y, w, h] of [...parts, ...overParts]) { x0 = Math.min(x0, x - 1); y0 = Math.min(y0, y - 1); x1 = Math.max(x1, x + w + 1); y1 = Math.max(y1, y + h + 1); }
-  for (const [x, y, w, h] of [...det, ...overDet])     { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
+  for (const [ps, ds] of layers) {
+    for (const [x, y, w, h] of ps) { x0 = Math.min(x0, x - 1); y0 = Math.min(y0, y - 1); x1 = Math.max(x1, x + w + 1); y1 = Math.max(y1, y + h + 1); }
+    for (const [x, y, w, h] of ds) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
+  }
   const c = document.createElement('canvas'), g = c.getContext('2d');
   c.width = x1 - x0; c.height = y1 - y0;
-  drawRects(-x0, -y0, parts, det, 1, coatPal(coat), g);
-  if (over) drawRects(-x0, -y0, overParts, overDet, 1, coatPal(coat), g);
+  for (const [ps, ds] of layers) drawRects(-x0, -y0, ps, ds, 1, coatPal(coat), g);
   return c.toDataURL();
 }
 function catStatus() {                                 // 狀態視窗要顯示的東西
@@ -2310,6 +2318,8 @@ function catStatus() {                                 // 狀態視窗要顯示�
     picture: away ? null : catPicture(),               // 去隔壁作客時家裡沒有貓
     away, canVisit: !!canVisit(),                      // 「狀態」分頁的「叫牠回家」「叫牠去隔壁玩」按鈕
     dlc: dlcs.map(d => ({ file: d.file, names: d.coats.map(k => COAT_NAMES[k] || k), error: d.error })),   // 「系統」分頁：載入了哪些 DLC
+    furn: Object.keys(FURN).filter(k => !BASE_FURN.has(k))   // 「家具」分頁：DLC 加的家具接在主程式的後面
+      .map(k => ({ id: k, name: String(FURN[k].name || k), desc: String(FURN[k].desc || '') })),
   };
 }
 const coatCards = () => Object.keys(COATS).map(k => ({ id: k, name: COAT_NAMES[k] || k, picture: catPicture(k, sitPose(0, 'sit'), 'card') }));
@@ -2375,13 +2385,14 @@ if (TAURI) setInterval(diaryFlush, 60000);
      off()            換成別的毛色時每一格都會叫：把專屬的東西收掉（要能重複叫）
      pose(f)          專屬狀態的姿勢；不是專屬狀態回傳 null
      dress(pose, who) 在任何姿勢上加外觀；who 是 'cat'（自己家的貓）、'guest'（隔壁來的客人）、'card'（毛色選單的小圖）。
-                      回傳 [parts, det, over]，over 是畫在貓前面的一層（叼著的魚乾、舉著的槓鈴）
+                      回傳 [parts, det, over]，over 是畫在貓前面的一層（叼著的魚乾）
      box()            專屬狀態的點擊範圍；不是回傳 null
-     hitFront(p)      比貓優先點到的東西（嘴上的魚乾）；hitBack(p) 比家具後面才點到的東西（健身器材）。回傳種類名稱或 null
+     hitFront(p)      比貓優先點到的東西（嘴上的魚乾）；hitBack(p) 比家具後面才點到的東西。回傳種類名稱或 null
      obj(kind)        拖曳時那個種類對應的物件；grab(kind, p) 按下去那一刻要先做的事；click(kind) 點一下（回傳 true 表示處理了）
-     update()         物理（魚乾、器材掉落）；drawBack() 畫在貓後面、drawFront() 畫在貓前面；resize(oldS) 改縮放時
+     update()         物理（魚乾掉落）；drawBack() 畫在貓後面、drawFront() 畫在貓前面；resize(oldS) 改縮放時
      key(k)           網頁版測試用的按鍵（閒著的時候才會叫）
    專屬物件要拖曳的話，在 HALF、TOP 登記半寬和最高能拎多高，拖曳就照家具的規則走。
+   不管哪一隻貓都會用的東西（健身器材……）做成家具，見下面的「DLC 家具」。
    角色的程式出錯（多半是主程式改了名字，DLC 還在用舊的）就停掉那個角色（charFail）：貓變回一般的貓，畫面不會停住。 */
 const CHARS = {};
 function charCall(k, name, ...args) {                  // 叫角色 k 的 name；沒有這個角色、沒有 name 就是 null
@@ -2394,21 +2405,73 @@ function look(pose, coat, who) {                       // 加上角色外觀
   const dressed = charCall(coat, 'dress', pose, who);
   return Array.isArray(dressed) ? dressed : pose;
 }
-function charStep() {                                  // updateCat 結尾：現在這隻跑 step，其他角色收掉自己的東西
+function charStep() {                                  // updateCat 結尾：現在這隻跑 step，其他角色收掉自己的東西；擺出來的 DLC 家具也跑 step
   for (const k of Object.keys(CHARS)) charCall(k, k === myCoat ? 'step' : 'off');
-  if (!CHARS[myCoat] && !BASE_STATES.has(cat.state)) tumble();   // 角色停掉了，貓還在做牠專屬的事：掉回地上，變回一般的貓
+  furnEach('step');
+  // 專屬的狀態卻沒有人給姿勢（角色停掉了、家具收起來了）：掉回地上，變回一般的貓
+  if (!BASE_STATES.has(cat.state) && !ownPose(cat.frame)) tumble();
 }
+const ownPose = f => hook('pose', f) || furnAsk('pose', f);   // 角色、DLC 家具的專屬狀態的姿勢
 // 側臉的頭：8 寬、6～7 高的那一塊（正面、翻肚的臉不是）。角色外觀照它的位置加東西
 const sideHead = parts => parts.find(([, , w, h, c]) => c === 'F' && w === 8 && (h === 6 || h === 7));
 const shift = (rects, dx, dy) => rects.map(r => [r[0] + dx, r[1] + dy, r[2], r[3], r[4]]);
+
+/* ═══ DLC 家具：DLC 也能加家具（健身器材……），哪一隻貓都會用 ═══
+   DLC 在 FURN 加一件：FURN.代號 = { name, desc, 下面的函式… }，在 HALF、TOP 登記半寬和拎起來最高到哪（沒登記就是 12、20）。
+   代號只能用小寫英文字母（main.rs 的 set_furniture 只收這種，不然收起來存不了）。
+   主程式補上 on、x、y、vx、vy、held，第一次擺在貓附近的空地；拖、甩、落地、改縮放都跟貓砂盆它們一樣。
+   狀態視窗的「家具」分頁會多一列：name 是名字、desc 是底下的小字；收起來會記住。
+   擺出來的每一件，主程式會在這些地方問它（this 就是那件家具；用不到的函式不用給）：
+     draw()   畫出來：墊在主程式的家具後面
+     hit(p)   p 點得到這件嗎（比主程式的家具後面才點到）。點到了就能拖；按下去沒怎麼動就放開算點一下，叫 click()，
+              回傳 true 表示處理了，不然就照甩的速度飛出去
+     idle()   nextIdle 擲骰子前（問過角色之後）：要來用就 setState 並回傳 true
+     step()   updateCat 結尾，每一格：用這件家具的狀態要做的事
+     pose(f)  用這件家具的狀態的姿勢；不是回傳 null
+     box()    用這件家具時貓的點擊範圍；不是回傳 null
+     over()   畫在貓前面的一層 [parts, det]（舉著的槓鈴……）；沒有回傳 null
+     off()    收起來的那一刻
+     key(k)   網頁版測試用的按鍵（閒著的時候才會叫）
+   貓在家具上面、裡面時，cat.in 設成家具的代號：家具收起來、貓被拎起來就會掉下來（tumble 會清掉 cat.in）。
+   新的狀態一樣加進 ZH、RATE。家具收起來、出錯時貓還在用的話，那個狀態沒有人給姿勢，貓就掉回地上（見 charStep）。
+   家具的程式出錯就收掉那一件（furnFail），錯誤顯示在狀態視窗「系統」分頁。 */
+const BASE_FURN = new Set(Object.keys(FURN));          // 主程式自己的家具；其他的是 DLC 加的
+const furnOwner = {};                                  // DLC 的家具是哪個 DLC 加的：出錯時記在那個 DLC 上
+const furnOn = () => Object.keys(FURN).filter(k => FURN[k].on);   // 擺出來的家具（主程式的家具沒有這些函式，問了也是 null）
+function furnCall(k, name, ...args) {                  // 叫家具 k 的 name；沒有這件、沒有 name 就是 null
+  const f = FURN[k];
+  if (!f || typeof f[name] !== 'function') return null;
+  try { return f[name](...args); } catch (e) { furnFail(k, e); return null; }
+}
+function furnAsk(name, ...args) {                      // 問每一件擺出來的家具，第一個有回答的算
+  for (const k of furnOn()) { const r = furnCall(k, name, ...args); if (r) return r; }
+  return null;
+}
+function furnEach(name, ...args) { for (const k of furnOn()) furnCall(k, name, ...args); }   // 每一件都叫
+function furnFail(k, e) {                              // 家具的程式出錯：收掉這件（貓在上面就掉下來），狀態視窗也不列了
+  console.error(e);
+  const f = FURN[k];
+  if (drag && drag.obj === f) { drag = null; document.body.classList.remove('grabbing'); }
+  delete FURN[k];
+  if (cat.in === k) tumble();
+  const d = furnOwner[k];
+  if (d && !d.error) d.error = `${f.name || k}收掉了，${dlcError(e, d)}`;
+}
+function freeSpot(half) {                              // 在貓附近找一塊空地擺家具：不壓到別的家具；擺不下就算了，疊著放
+  const taken = furnOn().map(k => [FURN[k].x, HALF[k]]);
+  const ok = x => x >= half && x <= W - half && taken.every(([tx, th]) => Math.abs(x - tx) >= half + th + 6);
+  for (let d = 30; d < W; d += 3) for (const s of [1, -1]) { const x = Math.round(cat.x + s * d); if (ok(x)) return x; }
+  return clamp(cat.x + 40, half, W - half);
+}
 
 /* ═══ DLC：一個 .yarncat 檔就是一個 DLC，放在 圖片\YarnCat\dlc（main.rs 的 read_dlc） ═══
    檔案裡是 JavaScript。開機時照檔名順序各跑一次，包在自己的函式裡：裡面的 const、function 不會跟主程式、別的 DLC 撞名，
    主程式的東西（cat、setState、standPose、COATS……）都用得到。DLC 通常會：
      - 在 COATS、COAT_NAMES 加毛色。毛色的代號只能用小寫英文字母（main.rs 的 set_coat 只收這種，不然選了存不起來）
      - 在 CHARS 登記角色（見「角色」）；新的顏色加進 C，新的狀態加進 ZH、RATE（要能摸、會忙的再加進 PETTABLE、BUSY）
-   主程式改名、刪掉 DLC 用到的東西，DLC 就會出錯：載入時出錯就整個不載入（加到一半的毛色、角色拿掉），
-   跑到一半出錯就停掉那個角色。錯誤都會顯示在狀態視窗「系統」分頁，找得到是第幾行就寫出來。
+     - 在 FURN 加家具（見「DLC 家具」）
+   主程式改名、刪掉 DLC 用到的東西，DLC 就會出錯：載入時出錯就整個不載入（加到一半的毛色、角色、家具拿掉），
+   跑到一半出錯就停掉那個角色、收掉那件家具。錯誤都會顯示在狀態視窗「系統」分頁，找得到是第幾行就寫出來。
    DLC 能做的事跟主程式一樣多，只放信任的人給的。用 eval 跑：tauri.conf.json 之後要加 CSP 的話，script-src 要有 'unsafe-eval'。
    網頁版沒有 dlc 資料夾：把 .yarncat 檔拖進視窗，存在這個分頁裡再重新整理（之後重新整理也還在，關掉分頁就沒了）。 */
 const dlcs = [];                                       // 載入過的 DLC：{ file, url, coats（加了哪些毛色）, error }
@@ -2418,19 +2481,26 @@ const isDlc = f => /\.yarncat$/i.test(f.name);
 function runDlc(file, code) {
   const d = { file, url: 'dlc/' + file.replace(/[^\w.-]/g, '_'), coats: [], error: '' };
   dlcs.push(d);
-  const coats = new Set(Object.keys(COATS)), chars = new Set(Object.keys(CHARS));
+  const coats = new Set(Object.keys(COATS)), chars = new Set(Object.keys(CHARS)), furn = new Set(Object.keys(FURN));
   try {
     // 間接 eval：在全域跑，看得到主程式的 const、let。包函式的那一行接著檔案的第一行，錯誤的行號才對得上檔案
     (0, eval)(`(function () {${code}\n})\n//# sourceURL=${d.url}`)();
+    for (const k of Object.keys(FURN)) if (!furn.has(k) && !(FURN[k] && typeof FURN[k] === 'object')) throw new Error(`FURN.${k} 不是物件`);
   } catch (e) {
     d.error = dlcError(e, d);
     console.error(e);
     for (const k of Object.keys(CHARS)) if (!chars.has(k)) delete CHARS[k];
     for (const k of Object.keys(COATS)) if (!coats.has(k)) delete COATS[k];
+    for (const k of Object.keys(FURN)) if (!furn.has(k)) delete FURN[k];
     return;
   }
   d.coats = Object.keys(COATS).filter(k => !coats.has(k));
   for (const k of Object.keys(CHARS)) if (!chars.has(k)) charOwner[k] = d;
+  for (const k of Object.keys(FURN)) if (!furn.has(k)) {   // DLC 的家具：補上位置，一件一件擺在貓附近的空地
+    furnOwner[k] = d;
+    HALF[k] = HALF[k] || 12; TOP[k] = TOP[k] || 20;
+    Object.assign(FURN[k], { on: true, x: freeSpot(HALF[k]), y: FLOOR, vx: 0, vy: 0, held: false });
+  }
 }
 function dlcError(e, d) {                              // 錯誤訊息；錯在 DLC 裡面的話加上第幾行
   const msg = (e && e.message) || String(e);
@@ -2485,19 +2555,20 @@ function frame(now) {
     updateGuest();
     linkTick();
     updateFurniture();
-    hook('update');                                    // 角色的東西：魚乾、健身器材的物理
+    hook('update');                                    // 角色的東西：魚乾的物理
     updateFx();
     diaryTick();
   }
   ctx.clearRect(0, 0, W, H);
-  if (tree.on) drawTree();                             // 家具墊在最底下；貓進了貓砂盆、紙箱，再把前面那片蓋上去
+  furnEach('draw');                                    // 家具墊在最底下，DLC 的家具又在主程式的後面；貓進了貓砂盆、紙箱，再把前面那片蓋上去
+  if (tree.on) drawTree();
   if (litter.on) drawLitter(false);
   if (box.on) drawBox(false);
   for (const q of poos) drawPoo(Math.round(q.x), Math.round(q.y));
   if (toy === 'ball') { drawRope(); drawBall(); }
   if (snack) drawSnack(Math.round(snack.x) - 3, Math.round(snack.y), snack.bites);
   if (treat && !treat.held) drawTreat();
-  hook('drawBack');                                    // 角色的東西：地上的魚乾、健身器材
+  hook('drawBack');                                    // 角色的東西：地上的魚乾
   if (guest) drawGuest();                              // 客人畫在家裡的貓後面
   if (cat.state === 'hide') drawPeek(); else drawCat();
   if (litter.on && cat.in === 'litter') drawLitter(true);

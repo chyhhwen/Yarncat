@@ -454,20 +454,9 @@ struct LinkPeer {
 /// 手動輸入的 IP 最多記幾個
 const LINK_MAX_IPS: usize = 8;
 
-/// 家具擺不擺出來；預設全部擺出來
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(default)]
-struct Furniture {
-    litter: bool,
-    tree: bool,
-    r#box: bool,
-}
-
-impl Default for Furniture {
-    fn default() -> Self {
-        Furniture { litter: true, tree: true, r#box: true }
-    }
-}
+/// 家具擺不擺出來：家具的代號 → 擺出來沒。沒記到的就是擺出來（預設全部擺出來）。
+/// 有哪些家具由前端決定（貓砂盆、貓跳台、紙箱，加上 DLC 的），這裡不重複列一份
+type Furniture = BTreeMap<String, bool>;
 
 fn settings_path(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_config_dir().ok().map(|d| d.join("settings.json"))
@@ -533,15 +522,14 @@ fn set_coat(app: AppHandle, coat: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 家具的代號跟毛色一樣只收小寫英文字母（litter、tree、box，DLC 的 bench…）
 #[tauri::command]
 fn set_furniture(app: AppHandle, name: String, on: bool) -> Result<(), String> {
-    if !["litter", "tree", "box"].contains(&name.as_str()) {
-        return Err(format!("沒有這件家具：{name}"));
+    if name.is_empty() || name.len() > 20 || !name.chars().all(|c| c.is_ascii_lowercase()) {
+        return Err(format!("家具的代號不對：{name}"));
     }
-    update_settings(&app, |s| match name.as_str() {
-        "litter" => s.furniture.litter = on,
-        "tree" => s.furniture.tree = on,
-        _ => s.furniture.r#box = on,
+    update_settings(&app, |s| {
+        s.furniture.insert(name, on);
     });
     Ok(())
 }
