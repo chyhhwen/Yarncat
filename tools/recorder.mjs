@@ -21,7 +21,7 @@ const KIT = `(() => {
   R.calm = () => { wishCD = pooCD = boxCD = treeCD = pomCD = visitCD = 1e9; };
   R.tick = (n = 1) => { for (let i = 0; i < n; i++) {
     if (toy === 'ball') updateBall(); else if (toy === 'laser') updateLaser(); else updateWand();
-    updateCat(); updateGuest(); linkTick(); updateFurniture(); updateFx(); } };
+    updateCat(); updateGuest(); linkTick(); updateFurniture(); hook('update'); updateFx(); } };
   const CURSOR = ['O......', 'OO.....', 'OWO....', 'OWWO...', 'OWWWO..', 'OWWWWO.', 'OWWWWWO', 'OWWWOOO', 'OWOWO..', 'OO.OWO.', '....OO.'];
   const cap = document.createElement('canvas'), o = cap.getContext('2d');
   const fire = (type, x, y) => window.dispatchEvent(new PointerEvent(type, { clientX: x * S, clientY: y * S, pointerId: 1, bubbles: true, button: 0, buttons: type === 'pointerup' ? 0 : 1 }));

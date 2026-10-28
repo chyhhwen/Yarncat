@@ -77,7 +77,7 @@ Win32 desktop pet (Tauri + WebView2) packaged as MSIX, not UWP. Full trust is ne
 **Notes for certification**（貼在「Additional Testing Information」頁。毛球貓沒有一般的視窗，要告訴審核人員去哪裡找）：
 
 ```
-YarnCat has no regular window or taskbar button. After launch, a pixel cat appears at the bottom of the primary screen, just above the taskbar. Left-click the cat icon in the system tray to open a small status window (status, coat, furniture, screen, link, system); right-click it for toys, treats, quiet mode and quit. On Windows 11 the icon may be hidden under the ^ overflow. Drag the cat or the yarn ball with the mouse to play. Networking is off by default: only if the user turns on the "連線" (Link) tab does the app use the local network (UDP/TCP port 52525) to find another YarnCat on the same LAN and exchange the cats' state with the computer the user paired with. It never contacts internet servers.
+YarnCat has no regular window or taskbar button. After launch, a pixel cat appears at the bottom of the primary screen, just above the taskbar. Left-click the cat icon in the system tray to open a small status window (status, coat, furniture, screen, link, system); right-click it for toys, treats, quiet mode and quit. On Windows 11 the icon may be hidden under the ^ overflow. Drag the cat or the yarn ball with the mouse to play. Networking is off by default: only if the user turns on the "連線" (Link) tab does the app use the local network (UDP/TCP port 52525) to find another YarnCat on the same LAN and exchange the cats' state with the computer the user paired with. It never contacts internet servers. Optional add-on files (.yarncat, small JavaScript files that add cat coats and animations) are loaded only if the user puts them in Pictures\YarnCat\dlc; none are bundled with or downloaded by the app.
 ```
 
 **隱私權政策**（Partner Center 規定一定要有，這次選「Provide privacy policy text」直接貼文字。這份只存在 Partner Center，要改的時候這裡也一起改。1.2.0 加了串門子，送 1.2.0 審核時要把 Partner Center 上的舊版換成下面這份；之後加了貓咪日記，下一版送審時也要換）：
@@ -123,6 +123,6 @@ Last updated: October 23, 2026
 ## 注意
 
 - 商店版不會在安裝時裝 WebView2。Windows 11 內建，絕大多數 Windows 10 也已經有了。
-- 泡泡圖片資料夾（`圖片\YarnCat`）照樣讀得到。寫進 AppData 的東西（WebView2 的快取）會被 Windows 導到 app 自己的資料夾，解除安裝時一起清掉。
+- 泡泡圖片資料夾（`圖片\YarnCat`）、DLC 資料夾（`圖片\YarnCat\dlc`）照樣讀得到。寫進 AppData 的東西（WebView2 的快取）會被 Windows 導到 app 自己的資料夾，解除安裝時一起清掉。
 - `icons/icon.png` 是 16×16 的像素畫放大 32 倍。`build.ps1` 先還原成 16×16，再放大整數倍，邊緣才不會糊。換成不是像素畫的圖示，`build.ps1` 會報錯，到時候要改它的縮放方式。
 - `resources.pri` 是圖示的索引，Windows 靠它照螢幕縮放比例挑尺寸。`makepri` 預設會把不同縮放比例的圖示拆到另外的檔案，只包一個 .msix 時會找不到，所以 `build.ps1` 把拆檔關掉了。

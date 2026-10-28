@@ -106,9 +106,9 @@ async fn read_picture(app: AppHandle, name: String) -> Result<Response, String> 
     std::fs::read(&path).map(Response::new).map_err(|e| e.to_string())
 }
 
-/// 系統匣「打開泡泡圖片資料夾」：還沒有就先建立，再用檔案總管（macOS 是 Finder）打開
-fn open_picture_dir(app: &AppHandle) {
-    let Some(dir) = picture_dir(app) else {
+/// 狀態視窗「打開泡泡圖片資料夾」「打開 DLC 資料夾」：還沒有就先建立，再用檔案總管（macOS 是 Finder）打開
+fn open_dir(dir: Option<PathBuf>) {
+    let Some(dir) = dir else {
         return;
     };
     if std::fs::create_dir_all(&dir).is_err() {
@@ -124,6 +124,66 @@ fn open_picture_dir(app: &AppHandle) {
     thread::spawn(move || {
         let _ = Command::new(opener).arg(dir).status();
     });
+}
+
+/* ─── DLC：一個 .yarncat 檔就是一個 DLC，放在圖片\YarnCat\dlc ───
+   放「圖片」不放 app 的設定資料夾：商店版寫進 AppData 的東西會被 Windows 導到 app 自己的資料夾，
+   使用者找不到（同貓咪日記）。檔案裡是 JavaScript，貓的視窗開機時讀進來跑（index.html 的「DLC」），
+   這裡只負責讀檔。DLC 跟主程式一樣能做任何事，只放信任的人給的。 */
+
+/// DLC 的副檔名（比的時候不分大小寫）。不用 .js：Windows 上點兩下會被 Windows Script Host 執行，Gmail 也不讓寄
+const DLC_EXT: &str = "yarncat";
+
+/// 一個 DLC 最大多大：只有程式碼，老大貓加健身貓不到 40 KB
+const DLC_MAX_BYTES: u64 = 2 * 1024 * 1024;
+
+fn dlc_dir(app: &AppHandle) -> Option<PathBuf> {
+    picture_dir(app).map(|d| d.join("dlc"))
+}
+
+/// 一個 DLC 檔：讀得到就是 code，讀不了就是 error（顯示在狀態視窗的「系統」分頁）
+#[derive(Serialize)]
+struct DlcFile {
+    file: String,
+    code: Option<String>,
+    error: Option<String>,
+}
+
+/// 開機時讀一次 dlc 資料夾裡所有的 DLC，照檔名排好：每次都照同樣的順序載入。資料夾還沒建立就是沒有 DLC
+#[tauri::command]
+async fn read_dlc(app: AppHandle) -> Vec<DlcFile> {
+    let Some(dir) = dlc_dir(&app) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(DLC_EXT)))
+        .filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| !n.starts_with('.'))) // macOS 的 ._ 隱藏檔
+        .collect();
+    paths.sort();
+    paths.iter().map(|p| read_dlc_file(p)).collect()
+}
+
+fn read_dlc_file(path: &Path) -> DlcFile {
+    let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let code = match std::fs::metadata(path) {
+        Ok(m) if !m.is_file() => Err("不是檔案".to_string()),
+        Ok(m) if m.len() > DLC_MAX_BYTES => Err("檔案太大".to_string()),
+        Ok(_) => std::fs::read_to_string(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::InvalidData => "不是 UTF-8 的文字檔".to_string(),
+            _ => e.to_string(),
+        }),
+        Err(e) => Err(e.to_string()),
+    };
+    match code {
+        // 用記事本存的會在最前面多一個 BOM
+        Ok(code) => DlcFile { file, code: Some(code.trim_start_matches('\u{feff}').to_string()), error: None },
+        Err(error) => DlcFile { file, code: None, error: Some(error) },
+    }
 }
 
 /// 長條該擺在哪、多大（實體像素）：(x, y, 寬, 高)
@@ -805,7 +865,12 @@ fn remove_link_ip(app: AppHandle, link: State<Arc<Link>>, ip: String) {
 
 #[tauri::command]
 fn open_picture_folder(app: AppHandle) {
-    open_picture_dir(&app);
+    open_dir(picture_dir(&app));
+}
+
+#[tauri::command]
+fn open_dlc_folder(app: AppHandle) {
+    open_dir(dlc_dir(&app));
 }
 
 #[tauri::command]
@@ -965,7 +1030,9 @@ fn main() {
             set_screen,
             diary_add,
             set_diary,
+            read_dlc,
             open_picture_folder,
+            open_dlc_folder,
             quit_app,
             hide_status,
             link_status,

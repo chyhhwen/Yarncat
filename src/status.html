@@ -70,7 +70,8 @@
   .facts dt { font-size: 11px; color: var(--sub); }
   .facts dd { margin: 0; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  /* 毛色 */
+  /* 毛色（DLC 加了毛色，排不下就捲） */
+  #tab-coat { overflow-y: auto; }
   .coats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .coat { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; min-height: 112px; padding: 8px 2px 10px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; }
   .coat:hover { border-color: var(--accent); }
@@ -134,9 +135,14 @@
   .chip button { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--sub); }
   .chip button:hover { color: var(--ink); }
 
-  /* 系統 */
+  /* 系統（好幾個 DLC 出錯時放不下，就捲，不要把按鈕壓扁） */
+  #tab-system { gap: 8px; overflow-y: auto; }
+  #tab-system > * { flex-shrink: 0; }
   .action { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 0 12px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; text-align: left; }
   .action:hover { border-color: var(--accent); }  .action svg { flex: none; }
+  #dlc-note { overflow-wrap: anywhere; }
+  /* 錯誤訊息一個最多兩行，整段在滑鼠停著時的提示裡 */
+  #dlc-note .warn { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   #version { margin-top: auto; font-size: 11px; color: var(--sub); }
 </style>
 </head>
@@ -255,6 +261,10 @@
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>
         <span><b>打開泡泡圖片資料夾</b><small id="pictures-path">圖片\YarnCat</small></span>
       </button>
+      <button type="button" class="action" id="open-dlc">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 7.5H9a2 2 0 1 1 4 0h3.5V11a2 2 0 1 1 0 4v3.5h-11z"/></svg>
+        <span><b>打開 DLC 資料夾</b><small id="dlc-note">圖片\YarnCat\dlc</small></span>
+      </button>
       <button type="button" class="action" id="quit">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v8"/><path d="M6.6 6.6a8 8 0 1 0 10.8 0"/></svg>
         <b>結束毛球貓</b>
@@ -266,8 +276,8 @@
 <script>
 /* 資料從哪來：
    - 設定（毛色、家具、螢幕、連線）：Rust 的 get_settings；改了會收到 settings 事件
-   - 貓現在的樣子：貓的視窗（index.html）在這個視窗開著時每半秒送一次 cat-status
-   - 毛色選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards 過來
+   - 貓現在的樣子：貓的視窗（index.html）在這個視窗開著時每半秒送一次 cat-status（載入了哪些 DLC 也在裡面）
+   - 毛色選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards 過來（DLC 的毛色也有）
    - 連線：找到的電腦、連上沒，Rust 的 link_status；有變會收到 link-status 事件 */
 const TAURI = window.__TAURI__;
 const $ = id => document.getElementById(id);
@@ -335,11 +345,13 @@ function renderStatus(s) {
   if (s.coat !== catCoat) { catCoat = s.coat; renderCoats(); }
   catAway = !!s.away; catCanVisit = !!s.canVisit;
   renderGo();
+  renderDlc(s.dlc || []);
 }
 
 /* ─── 毛色 ─── */
 function renderCoats() {
-  const chosen = settings.coat || catCoat;
+  // 選過的毛色；沒選過、或選的是現在沒有的 DLC 毛色（DLC 拿掉了），就勾貓現在的毛色
+  const chosen = coats.some(c => c.id === settings.coat) ? settings.coat : catCoat;
   $('coats').replaceChildren(...coats.map(c => {
     const b = document.createElement('button');
     b.type = 'button';
@@ -453,12 +465,31 @@ $('ip-form').addEventListener('submit', e => {
 });
 
 /* ─── 系統 ─── */
+let dlcPath = '圖片\\YarnCat\\dlc';
 if (/Mac/.test(navigator.platform)) {
   $('pictures-path').textContent = '~/Pictures/YarnCat';
   $('diary-path').textContent = '只記次數和時間，存在 ~/Pictures/YarnCat';
+  dlcPath = $('dlc-note').textContent = '~/Pictures/YarnCat/dlc';
 }
 $('diary-on').addEventListener('click', () => call('set_diary', { on: settings.diary === false }));
 $('open-pictures').addEventListener('click', () => call('open_picture_folder'));
+$('open-dlc').addEventListener('click', () => call('open_dlc_folder'));
+let lastDlc = '';
+// 「打開 DLC 資料夾」底下：載入了哪些毛色（沒有 DLC 就寫資料夾在哪）；有 DLC 出錯就改成寫錯誤，一個 DLC 一則
+function renderDlc(list) {
+  const names = list.flatMap(d => d.names.length ? d.names : d.error ? [] : [d.file]);
+  const errors = list.filter(d => d.error).map(d => `${d.file}：${d.error}`);
+  const key = JSON.stringify([names, errors]);
+  if (key === lastDlc) return;                         // 每半秒送一次，沒變就不動
+  lastDlc = key;
+  $('open-dlc').title = errors.join('\n');
+  $('dlc-note').replaceChildren(...(errors.length ? errors.map(text => {
+    const line = document.createElement('span');
+    line.className = 'warn';
+    line.textContent = text;
+    return line;
+  }) : [names.length ? '已載入：' + names.join('、') : dlcPath]));
+}
 $('quit').addEventListener('click', () => call('quit_app'));
 if (TAURI && TAURI.app) TAURI.app.getVersion().then(v => { $('version').textContent = '版本 ' + v; }).catch(() => {});
 
@@ -483,8 +514,9 @@ if (TAURI) {
     on('status-shown', () => { showTab('status'); loadSettings(); loadScreens(); loadLink(); }),   // 每次打開都從「狀態」開始
   ]).then(() => TAURI.event.emitTo('main', 'status-ready'));   // 請貓的視窗把小圖、現在的狀態送過來
 } else {
-  coats = [{ id: 'gray', name: '藍灰虎斑' }, { id: 'orange', name: '橘貓' }, { id: 'tuxedo', name: '黑白賓士' }];
-  renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', toy: '毛球', picture: null, away: false, canVisit: true });
+  coats = [{ id: 'gray', name: '藍灰虎斑' }, { id: 'orange', name: '橘貓' }, { id: 'tuxedo', name: '黑白賓士' }, { id: 'boss', name: '老大' }, { id: 'gym', name: '健身' }];
+  renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', toy: '毛球', picture: null, away: false, canVisit: true,
+    dlc: [{ file: 'boss-gym.yarncat', names: ['老大', '健身'], error: '' }] });
 }
 loadSettings();
 loadScreens();
