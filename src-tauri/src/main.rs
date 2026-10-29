@@ -21,7 +21,6 @@ use link::Link;
 use serde::{Deserialize, Serialize};
 use tauri::{
     ipc::Response,
-    menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::Monitor,
     AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
@@ -31,7 +30,7 @@ use tauri::{
 /// 長條視窗的高度（邏輯像素，會依螢幕縮放比例換算）
 const STRIP_HEIGHT: f64 = 150.0;
 
-/// 雷射光、逗貓棒跟著游標跑遍全螢幕，要一直回報游標位置；
+/// 雷射光、逗貓棒跟著游標跑遍全螢幕，要一直回報游標位置（前端換玩具時用 set_follow 說）；
 /// 毛球只在乎游標有沒有在長條裡，離開長條就不用回報
 static FOLLOW_EVERYWHERE: AtomicBool = AtomicBool::new(false);
 
@@ -404,7 +403,7 @@ mod appkit {
     }
 }
 
-/* ─── 設定：會記住的只有毛色、家具、貓待在哪個螢幕、串門子的連線設定、要不要記貓咪日記 ─── */
+/* ─── 設定：會記住的只有毛色、配件、家具、貓待在哪個螢幕、串門子的連線設定、要不要記貓咪日記 ─── */
 
 /// 存在 app 設定資料夾的 settings.json（Windows 是 %APPDATA%\com.yarncat.desktop；
 /// 商店版會被 Windows 導到 app 自己的資料夾，解除安裝時一起清掉）。
@@ -415,6 +414,8 @@ mod appkit {
 struct Settings {
     /// 毛色；None 是沒選過（藍灰，串門子撞色時可以自動換一隻）
     coat: Option<String>,
+    /// 配件（DLC 加的帽子……）；None 是沒選過（戴第一件），"none" 是不戴
+    wear: Option<String>,
     furniture: Furniture,
     /// 貓待在哪個螢幕（monitor_key）；None 是主螢幕
     screen: Option<String>,
@@ -425,7 +426,7 @@ struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { coat: None, furniture: Furniture::default(), screen: None, link: LinkSettings::default(), diary: true }
+        Settings { coat: None, wear: None, furniture: Furniture::default(), screen: None, link: LinkSettings::default(), diary: true }
     }
 }
 
@@ -519,6 +520,16 @@ fn set_coat(app: AppHandle, coat: String) -> Result<(), String> {
         return Err(format!("毛色的名字不對：{coat}"));
     }
     update_settings(&app, |s| s.coat = Some(coat));
+    Ok(())
+}
+
+/// 配件的代號跟毛色一樣只收小寫英文字母（DLC 的 halloween…，不戴是 none）。有哪些配件由前端決定
+#[tauri::command]
+fn set_wear(app: AppHandle, wear: String) -> Result<(), String> {
+    if wear.is_empty() || wear.len() > 20 || !wear.chars().all(|c| c.is_ascii_lowercase()) {
+        return Err(format!("配件的代號不對：{wear}"));
+    }
+    update_settings(&app, |s| s.wear = Some(wear));
     Ok(())
 }
 
@@ -871,10 +882,16 @@ fn hide_status(app: AppHandle) {
     hide_status_window(&app);
 }
 
-/* ─── 狀態視窗：左鍵點系統匣圖示打開，看貓在做什麼、換毛色、收放家具、選螢幕 ─── */
+/// 前端換了玩具：要不要一直回報游標位置（見 FOLLOW_EVERYWHERE）。有哪些玩具由前端決定
+#[tauri::command]
+fn set_follow(on: bool) {
+    FOLLOW_EVERYWHERE.store(on, Ordering::Relaxed);
+}
+
+/* ─── 狀態視窗：點系統匣圖示打開，看貓在做什麼、換玩具、餵貓條、安靜模式、換毛色和配件、收放家具、選螢幕 ─── */
 
 /// 狀態視窗的大小（邏輯像素）
-const STATUS_SIZE: (f64, f64) = (360.0, 380.0);
+const STATUS_SIZE: (f64, f64) = (360.0, 500.0);
 
 /// 離工作列、螢幕邊緣多遠（邏輯像素）
 const STATUS_MARGIN: f64 = 8.0;
@@ -931,7 +948,7 @@ fn hide_status_window(app: &AppHandle) {
     let _ = app.emit_to("main", "status-visible", false);
 }
 
-/// 左鍵點系統匣圖示：開著就關、關著就開（rect 是圖示的位置）。
+/// 點系統匣圖示：開著就關、關著就開（rect 是圖示的位置）。
 /// 圖示的位置用 tauri::Rect 寫全名：上面長條用的 Rect 是另一個同名的 (x, y, 寬, 高)
 fn toggle_status_window(app: &AppHandle, rect: tauri::Rect) {
     let just_hidden = STATUS_HIDDEN_AT
@@ -945,12 +962,12 @@ fn toggle_status_window(app: &AppHandle, rect: tauri::Rect) {
     if open {
         hide_status_window(app);
     } else if !just_hidden {
-        show_status_window(app, Some(rect));
+        show_status_window(app, rect);
     }
 }
 
-/// 打開狀態視窗；從選單打開時沒有圖示位置，擺在游標旁邊
-fn show_status_window(app: &AppHandle, anchor: Option<tauri::Rect>) {
+/// 打開狀態視窗，擺在系統匣圖示（anchor）旁邊
+fn show_status_window(app: &AppHandle, anchor: tauri::Rect) {
     let (win, fresh) = match app.get_webview_window("status") {
         Some(w) => (w, false),
         None => match build_status_window(app) {
@@ -972,20 +989,12 @@ fn show_status_window(app: &AppHandle, anchor: Option<tauri::Rect>) {
 
 /// 擺在圖示旁邊：水平對準圖示中間、不超出螢幕；
 /// 工作列在下面（Windows 預設）就貼著工作列往上長，在上面（macOS 選單列）就往下長
-fn place_status_window(app: &AppHandle, win: &WebviewWindow, anchor: Option<tauri::Rect>) {
+fn place_status_window(app: &AppHandle, win: &WebviewWindow, anchor: tauri::Rect) {
     // 圖示的位置在 Windows 是實體像素；萬一給的是邏輯像素，先用主螢幕的縮放比例換算
     let scale_guess = app.primary_monitor().ok().flatten().map_or(1.0, |m| m.scale_factor());
-    let (cx, cy) = match anchor {
-        Some(r) => {
-            let p = r.position.to_physical::<f64>(scale_guess);
-            let s = r.size.to_physical::<f64>(scale_guess);
-            (p.x + s.width / 2.0, p.y + s.height / 2.0)
-        }
-        None => match app.cursor_position() {
-            Ok(p) => (p.x, p.y),
-            Err(_) => return,
-        },
-    };
+    let p = anchor.position.to_physical::<f64>(scale_guess);
+    let s = anchor.size.to_physical::<f64>(scale_guess);
+    let (cx, cy) = (p.x + s.width / 2.0, p.y + s.height / 2.0);
     let Ok(Some(monitor)) = app.monitor_from_point(cx, cy) else {
         return;
     };
@@ -1013,6 +1022,7 @@ fn main() {
             read_picture,
             get_settings,
             set_coat,
+            set_wear,
             set_furniture,
             list_screens,
             set_screen,
@@ -1023,6 +1033,7 @@ fn main() {
             open_dlc_folder,
             quit_app,
             hide_status,
+            set_follow,
             link_status,
             link_state,
             link_send,
@@ -1069,27 +1080,11 @@ fn main() {
             win.show()?;
             watch_cursor(win.clone());
 
-            // 系統匣：左鍵打開狀態視窗（毛色、家具、螢幕、泡泡圖片資料夾都在那裡，選好會記住）；
-            // 右鍵選單只放當下要用的：換玩具、餵貓條、安靜模式（開會、分享螢幕時讓貓去睡），這些不記
-            let toy_ball = CheckMenuItem::with_id(app, "toy:ball", "毛球", true, true, None::<&str>)?;
-            let toy_laser = CheckMenuItem::with_id(app, "toy:laser", "雷射光", true, false, None::<&str>)?;
-            let toy_wand = CheckMenuItem::with_id(app, "toy:wand", "逗貓棒", true, false, None::<&str>)?;
-            let toys = Submenu::with_items(app, "玩具", true, &[&toy_ball, &toy_laser, &toy_wand])?;
-            // 餵貓條：在貓前面掉一條下來（地上已經有一條就不會再掉）
-            let treat = MenuItem::with_id(app, "treat", "餵貓條", true, None::<&str>)?;
-            let quiet = CheckMenuItem::with_id(app, "quiet", "安靜模式", true, false, None::<&str>)?;
-            let status = MenuItem::with_id(app, "status", "狀態與設定…", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "結束毛球貓", true, None::<&str>)?;
-            let sep1 = PredefinedMenuItem::separator(app)?;
-            let sep2 = PredefinedMenuItem::separator(app)?;
-            let menu = Menu::with_items(app, &[&toys, &treat, &quiet, &sep1, &status, &sep2, &quit])?;
-            let quiet_item = quiet.clone();
-            let toy_items = [toy_ball, toy_laser, toy_wand];
+            // 系統匣：左鍵打開狀態視窗，什麼都在那裡（換玩具、餵貓條、安靜模式、毛色、配件、家具、螢幕、結束）；
+            // 沒有右鍵選單，按右鍵不會怎樣
             TrayIconBuilder::with_id("tray")
                 .icon(app.default_window_icon().expect("缺少圖示").clone())
                 .tooltip("毛球貓")
-                .menu(&menu)
-                .show_menu_on_left_click(false) // 左鍵是狀態視窗，右鍵才是選單
                 .on_tray_icon_event(|tray, event| {
                     if let TrayIconEvent::Click {
                         button: MouseButton::Left,
@@ -1100,27 +1095,6 @@ fn main() {
                     {
                         toggle_status_window(tray.app_handle(), rect);
                     }
-                })
-                .on_menu_event(move |app, event| match event.id.as_ref() {
-                    "quiet" => {
-                        let on = quiet_item.is_checked().unwrap_or(false);
-                        let _ = app.emit("quiet", on);
-                    }
-                    "treat" => {
-                        let _ = app.emit("treat", ());
-                    }
-                    "status" => show_status_window(app, None),
-                    "quit" => app.exit(0),
-                    // 玩具只能選一個：點到的打勾，其他取消
-                    id if id.starts_with("toy:") => {
-                        for item in &toy_items {
-                            let mine: &str = item.id().as_ref();
-                            let _ = item.set_checked(mine == id);
-                        }
-                        FOLLOW_EVERYWHERE.store(id != "toy:ball", Ordering::Relaxed);
-                        let _ = app.emit("toy", &id[4..]);
-                    }
-                    _ => {}
                 })
                 .build(app)?;
             Ok(())

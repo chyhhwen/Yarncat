@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>毛球貓</title>
 <style>
-  /* 狀態視窗：左鍵點系統匣圖示打開（main.rs 的 toggle_status_window），點到別的地方就收起來。
+  /* 狀態視窗：點系統匣圖示打開（main.rs 的 toggle_status_window），點到別的地方就收起來。
      毛球貓不連網：字型只用系統內建的，不載入網路字型 */
   :root {
     --ink: #262530; --sub: #5c6577; --sub2: #4a5263; --line: rgba(38, 37, 48, 0.1); --edge: rgba(38, 37, 48, 0.22);
@@ -66,12 +66,19 @@
   .slots { display: flex; gap: 3px; }
   .slots i { width: 22px; height: 10px; border-radius: 2px; background: var(--empty); }
   .slots i.on { background: var(--poo); }
+  .toys { flex-wrap: wrap; }                           /* DLC 加了玩具，一排放不下就換行 */
+  .toys button { flex: 1 0 auto; padding: 0 6px; }
+  .quick { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .quick span { margin-left: auto; }
+  #treat { height: 30px; padding: 0 14px; border: 1px solid var(--accent); border-radius: 999px; background: #fff; color: var(--accent); font-size: 12px; font-weight: 700; }
+  #treat:hover { background: var(--accent); color: #fff; }
+  #treat:disabled { opacity: 0.5; cursor: default; background: #fff; color: var(--accent); }
   .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: auto 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
   .facts dt { font-size: 11px; color: var(--sub); }
   .facts dd { margin: 0; font-size: 13px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  /* 毛色（DLC 加了毛色，排不下就捲） */
-  #tab-coat { overflow-y: auto; }
+  /* 毛色、配件（DLC 加了毛色、配件，排不下就捲） */
+  #tab-coat, #tab-wear { overflow-y: auto; }
   .coats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .coat { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; min-height: 112px; padding: 8px 2px 10px; border: 1px solid rgba(38, 37, 48, 0.14); border-radius: 8px; background: #fff; }
   .coat:hover { border-color: var(--accent); }
@@ -163,6 +170,9 @@
     <button type="button" data-tab="coat" aria-label="毛色" title="毛色" aria-pressed="false"><span>
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3.2a8.8 8.8 0 1 0 0 17.6c1.1 0 1.8-.8 1.8-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a4.8 4.8 0 0 0 4.8-4.8c0-3.9-3.9-7-8.8-7z"/><circle cx="7.6" cy="11.2" r="1"/><circle cx="9.6" cy="7.4" r="1"/><circle cx="14" cy="7" r="1"/><circle cx="17" cy="10" r="1"/></svg>
     </span></button>
+    <button type="button" data-tab="wear" aria-label="配件" title="配件" aria-pressed="false"><span>
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 18.5h18"/><path d="M6.5 18.5 9.5 4l7 6.5-2.2 2 1.2 6"/><path d="M8.4 14.5h7.3"/></svg>
+    </span></button>
     <button type="button" data-tab="furn" aria-label="家具" title="家具" aria-pressed="false"><span>
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5"/><path d="M12 12v9"/></svg>
     </span></button>
@@ -198,9 +208,18 @@
         <div class="stat-head"><span>貓砂盆</span><span class="num" id="poop-num"></span></div>
         <div class="litter"><div class="slots" id="poop-slots"></div><span id="poop-note"></span></div>
       </div>
+      <div class="stat">
+        <div class="stat-head"><span>玩具</span></div>
+        <div class="seg toys" id="toys" role="group" aria-label="玩具"></div>
+      </div>
+      <div class="quick">
+        <button type="button" id="treat">餵貓條</button>
+        <span>安靜模式</span>
+        <button type="button" class="switch" id="quiet" aria-label="安靜模式：讓貓去睡覺" title="開會、分享螢幕時讓貓去睡覺" aria-pressed="false"></button>
+      </div>
       <dl class="facts">
         <div><dt>毛色</dt><dd id="fact-coat">–</dd></div>
-        <div><dt>玩具</dt><dd id="fact-toy">–</dd></div>
+        <div><dt>配件</dt><dd id="fact-wear">–</dd></div>
         <div><dt>螢幕</dt><dd id="fact-screen">–</dd></div>
       </dl>
     </section>
@@ -209,6 +228,13 @@
       <h2>毛色</h2>
       <p class="hint">選好會記住，重開也一樣。</p>
       <div class="coats" id="coats"></div>
+    </section>
+
+    <section id="tab-wear" hidden>
+      <h2>配件</h2>
+      <p class="hint">選好會記住。隔壁來的客人戴牠自己的。</p>
+      <div class="coats" id="wears"></div>
+      <p class="empty" id="wears-empty" hidden>還沒有配件。裝了有配件的 DLC（例如萬聖節），就會出現在這裡。</p>
     </section>
 
     <section id="tab-furn" hidden>
@@ -279,15 +305,18 @@
 /* 資料從哪來：
    - 設定（毛色、家具、螢幕、連線）：Rust 的 get_settings；改了會收到 settings 事件
    - 貓現在的樣子：貓的視窗（index.html）在這個視窗開著時每半秒送一次 cat-status（載入了哪些 DLC、DLC 加的家具也在裡面）
-   - 毛色選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards 過來（DLC 的毛色也有）
+   - 毛色、配件選單的小圖：貓的視窗用自己的畫法畫好，送 coat-cards、wear-cards 過來（DLC 的毛色、配件也有）
+   - 玩具、安靜模式、餵貓條：直接送事件給貓的視窗（toy、quiet、treat），不經過 Rust，也不記
    - 連線：找到的電腦、連上沒，Rust 的 link_status；有變會收到 link-status 事件 */
 const TAURI = window.__TAURI__;
 const $ = id => document.getElementById(id);
-const TABS = { status: '狀態', coat: '毛色', furn: '家具', screen: '螢幕', link: '連線', system: '系統' };
+const TABS = { status: '狀態', coat: '毛色', wear: '配件', furn: '家具', screen: '螢幕', link: '連線', system: '系統' };
 const SCALE = 3;                                       // 貓的小圖放大幾倍（跟桌面上一樣大；最寬的飛撲 35 格 × 3 剛好塞得進框）
-let settings = { coat: null, furniture: { litter: true, tree: true, box: true }, screen: null, link: { on: false, ips: [] }, diary: true };
+let settings = { coat: null, wear: null, furniture: { litter: true, tree: true, box: true }, screen: null, link: { on: false, ips: [] }, diary: true };
 let catCoat = 'gray';                                  // 貓現在的毛色（沒選過時是預設的藍灰）
-let coats = [];                                        // 毛色選單：[{ id, name, picture }]
+let catWear = 'none';                                  // 貓現在戴的配件（沒選過時是第一件）
+let coats = [], wears = [];                            // 毛色、配件選單：[{ id, name, picture }]
+let catToy = 'ball', catQuiet = false;                 // 現在的玩具、安靜模式開了沒（貓的視窗送來的，這些不記在設定裡）
 let screens = [];                                      // [{ key, label, chosen }]
 let link = { on: false, name: '', ips: [], peers: [], error: null, side: 1 };   // 連線狀態（見 main.rs 的 LinkView）
 let catAway = false, catCanVisit = false;              // 貓在不在隔壁、現在能不能去隔壁（「叫牠回家」「叫牠去隔壁」按鈕用）
@@ -306,6 +335,7 @@ function showTab(tab) {
 for (const b of document.querySelectorAll('nav button')) b.addEventListener('click', () => showTab(b.dataset.tab));
 
 const hide = () => call('hide_status');
+const tell = (name, payload) => { if (TAURI) TAURI.event.emitTo('main', name, payload).catch(() => {}); };   // 直接告訴貓的視窗
 $('close').addEventListener('click', hide);
 window.addEventListener('keydown', e => { if (e.key === 'Escape') hide(); });
 
@@ -343,19 +373,41 @@ function renderStatus(s) {
     $('poop-note').textContent = left <= 0 ? '太髒了，牠不肯進去' : s.poop === 0 ? '乾淨' : `再 ${left} 坨就不肯進去`;
   }
   $('fact-coat').textContent = s.coatName;
-  $('fact-toy').textContent = s.toy;
+  $('fact-wear').textContent = s.wearName;
   if (s.coat !== catCoat) { catCoat = s.coat; renderCoats(); }
+  if (s.wear !== catWear) { catWear = s.wear; renderWears(); }
+  catToy = s.toy; catQuiet = !!s.quiet;
+  renderToys(s.toys || []);
+  $('quiet').setAttribute('aria-pressed', String(catQuiet));
+  $('treat').disabled = !!s.treat;
+  $('treat').title = s.treat ? '地上已經有一條了' : '';
   catAway = !!s.away; catCanVisit = !!s.canVisit;
   renderGo();
   renderDlc(s.dlc || []);
   renderFurn(s.furn || []);
 }
 
-/* ─── 毛色 ─── */
-function renderCoats() {
-  // 選過的毛色；沒選過、或選的是現在沒有的 DLC 毛色（DLC 拿掉了），就勾貓現在的毛色
-  const chosen = coats.some(c => c.id === settings.coat) ? settings.coat : catCoat;
-  $('coats').replaceChildren(...coats.map(c => {
+/* ─── 玩具、安靜模式、餵貓條：直接告訴貓的視窗，畫面等下一次 cat-status 再更新 ─── */
+let lastToys = '';
+function renderToys(list) {                            // 主程式的毛球、雷射光、逗貓棒，後面接著 DLC 加的；每半秒送一次，沒變就不動
+  const key = JSON.stringify([list, catToy]);
+  if (key === lastToys) return;
+  lastToys = key;
+  $('toys').replaceChildren(...list.map(t => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = t.name;
+    b.setAttribute('aria-pressed', String(t.id === catToy));
+    b.addEventListener('click', () => tell('toy', t.id));
+    return b;
+  }));
+}
+$('quiet').addEventListener('click', () => tell('quiet', !catQuiet));
+$('treat').addEventListener('click', () => tell('treat'));
+
+/* ─── 毛色、配件：一張一張的小圖卡，點了就存起來 ─── */
+function renderCards(el, list, chosen, pick) {
+  el.replaceChildren(...list.map(c => {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'coat';
@@ -370,9 +422,19 @@ function renderCoats() {
     const name = document.createElement('span');
     name.textContent = c.name;
     b.append(name);
-    b.addEventListener('click', () => call('set_coat', { coat: c.id }));
+    b.addEventListener('click', () => pick(c.id));
     return b;
   }));
+}
+function renderCoats() {
+  // 選過的毛色；沒選過、或選的是現在沒有的 DLC 毛色（DLC 拿掉了），就勾貓現在的毛色
+  const chosen = coats.some(c => c.id === settings.coat) ? settings.coat : catCoat;
+  renderCards($('coats'), coats, chosen, coat => call('set_coat', { coat }));
+}
+function renderWears() {                               // 第一張是「不戴」；選的配件 DLC 拿掉了，就勾「不戴」（貓現在戴的）
+  const chosen = wears.some(w => w.id === settings.wear) ? settings.wear : catWear;
+  renderCards($('wears'), wears, chosen, wear => call('set_wear', { wear }));
+  $('wears-empty').hidden = wears.length > 1;
 }
 
 /* ─── 家具：貓砂盆、貓跳台、紙箱，後面接著 DLC 加的（貓的視窗在 cat-status 裡送來） ─── */
@@ -528,6 +590,7 @@ function renderSettings() {
   for (const b of document.querySelectorAll('[data-furn]')) b.setAttribute('aria-pressed', String(settings.furniture[b.dataset.furn] !== false));
   $('diary-on').setAttribute('aria-pressed', String(settings.diary !== false));
   renderCoats();
+  renderWears();
   renderLink();                                        // 手動輸入的 IP 存在設定裡
 }
 function loadSettings() {
@@ -539,14 +602,19 @@ if (TAURI) {
   Promise.all([
     on('cat-status', renderStatus),
     on('coat-cards', list => { coats = list || []; renderCoats(); }),
+    on('wear-cards', list => { wears = list || []; renderWears(); }),
     on('settings', s => { settings = s; renderSettings(); loadScreens(); }),
     on('link-status', s => { link = s; renderLink(); }),
     on('status-shown', () => { showTab('status'); loadSettings(); loadScreens(); loadLink(); }),   // 每次打開都從「狀態」開始
   ]).then(() => TAURI.event.emitTo('main', 'status-ready'));   // 請貓的視窗把小圖、現在的狀態送過來
 } else {
   coats = [{ id: 'gray', name: '藍灰虎斑' }, { id: 'orange', name: '橘貓' }, { id: 'tuxedo', name: '黑白賓士' }, { id: 'boss', name: '老大' }, { id: 'gym', name: '健身' }];
-  renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', toy: '毛球', picture: null, away: false, canVisit: true,
-    dlc: [{ file: 'boss-gym.yarncat', names: ['老大', '健身'], error: '' }],
+  wears = [{ id: 'none', name: '不戴' }, { id: 'halloween', name: '萬聖節帽子' }];
+  renderStatus({ doing: '盯著毛球', energy: 80, poop: 2, dirty: 3, coat: 'gray', coatName: '藍灰虎斑', wear: 'halloween', wearName: '萬聖節帽子',
+    toy: 'ball', toys: [{ id: 'ball', name: '毛球' }, { id: 'laser', name: '雷射光' }, { id: 'wand', name: '逗貓棒' }, { id: 'fish', name: '小魚乾' }],
+    quiet: false, treat: false, picture: null, away: false, canVisit: true,
+    dlc: [{ file: 'boss.yarncat', names: ['老大', '小魚乾'], error: '' }, { file: 'gym.yarncat', names: ['健身'], error: '' },
+      { file: 'boss-gym.yarncat', names: [], error: '已經拆成 boss.yarncat（老大貓、小魚乾）和 gym.yarncat（健身貓、健身器材），刪掉這個舊檔就好' }],
     furn: [{ id: 'bench', name: '臥推椅', desc: '躺上去推槓鈴' }, { id: 'mill', name: '跑步機', desc: '原地跑步，點一下加速' },
       { id: 'lat', name: '高拉背機', desc: '往下拉，點一下加重量' }] });
 }
@@ -562,6 +630,7 @@ function fake(cmd, args) {                             // 瀏覽器版的假 Rus
       { key: 'b', label: '螢幕 2：2560×1440', chosen: false },
     ];
     case 'set_coat': settings.coat = args.coat; renderSettings(); return;
+    case 'set_wear': settings.wear = args.wear; renderSettings(); return;
     case 'set_furniture': settings.furniture[args.name] = args.on; renderSettings(); return;
     case 'set_diary': settings.diary = args.on; renderSettings(); return;
     case 'set_screen': screens = screens.map(s => ({ ...s, chosen: s.key === args.key })); return;
