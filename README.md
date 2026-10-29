@@ -160,3 +160,8 @@ npm run tauri dev
 - 游標位置只用來讓貓追玩具、判斷你有沒有點到貓，不會記錄下來。
 - 泡泡圖片資料夾裡的圖片只在你的電腦上讀取、畫在泡泡裡，不會傳到任何地方。
 - 例外是安裝和更新：GitHub 版的安裝程式在電腦裡沒有 Microsoft Edge WebView2 時，會向微軟下載安裝（這是 Windows 顯示畫面用的元件）；商店版的下載、更新由 Microsoft Store 進行。這些過程都由微軟處理。
+
+## 授權
+
+本專案採用 [PolyForm Noncommercial 1.0.0](LICENSE.md)。
+個人、教育、非營利用途可免費使用；商業用途請聯絡作者。
