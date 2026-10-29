@@ -163,5 +163,5 @@ npm run tauri dev
 
 ## 授權
 
-本專案採用 [PolyForm Noncommercial 1.0.0](LICENSE.md)。
+本專案採用 [PolyForm Noncommercial 1.0.0](LICENSE)。
 個人、教育、非營利用途可免費使用；商業用途請聯絡作者。
